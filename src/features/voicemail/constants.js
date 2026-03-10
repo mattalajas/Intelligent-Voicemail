@@ -10,15 +10,15 @@ import {
 
 export const urgencyStyles = {
   Critical: "bg-red-100 text-red-700 border-red-200",
-  High: "bg-amber-100 text-amber-700 border-amber-200",
-  Normal: "bg-blue-100 text-blue-700 border-blue-200",
-  Low: "bg-slate-100 text-slate-700 border-slate-200",
+  High: "bg-rose-100 text-rose-700 border-rose-200",
+  Normal: "bg-pink-100 text-pink-700 border-pink-200",
+  Low: "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200",
   Unknown: "bg-zinc-100 text-zinc-700 border-zinc-200",
 };
 
 export const statusStyles = {
-  New: "bg-slate-900 text-white",
-  "In Progress": "bg-amber-500 text-white",
+  New: "bg-blue-600 text-white",
+  "In Progress": "bg-yellow-500 text-slate-950",
   Resolved: "bg-emerald-600 text-white",
 };
 

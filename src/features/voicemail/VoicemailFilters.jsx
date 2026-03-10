@@ -11,14 +11,17 @@ export function VoicemailFilters({
   setQueueFilter,
   statusFilter,
   setStatusFilter,
+  urgencyFilter,
+  setUrgencyFilter,
   tab,
   setTab,
 }) {
   const queues = [...new Set(items.map((item) => item.queue))];
+  const urgencies = ["Critical", "High", "Normal", "Low", "Unknown"];
   const tabs = [
     { value: "all", label: "All" },
     { value: "priority", label: "Priority" },
-    { value: "new", label: "New" },
+    { value: "unresolved", label: "Unresolved" },
     { value: "resolved", label: "Resolved" },
   ];
 
@@ -63,6 +66,18 @@ export function VoicemailFilters({
               <option value="New">New</option>
               <option value="In Progress">In Progress</option>
               <option value="Resolved">Resolved</option>
+            </select>
+            <select
+              value={urgencyFilter}
+              onChange={(event) => setUrgencyFilter(event.target.value)}
+              className="h-10 w-[170px] rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
+            >
+              <option value="all">All urgency</option>
+              {urgencies.map((urgency) => (
+                <option key={urgency} value={urgency}>
+                  {urgency}
+                </option>
+              ))}
             </select>
           </div>
         </div>

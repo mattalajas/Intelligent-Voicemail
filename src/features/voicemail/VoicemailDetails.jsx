@@ -1,24 +1,103 @@
 import React from "react";
-import { CheckCircle2, Phone, Play } from "lucide-react";
+import { CheckCircle2, Pencil, Phone, Play } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { statusStyles, urgencyStyles } from "./constants";
 
-export function VoicemailDetails({ selected, updateItem }) {
+export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
+  const relatedHistory = selected?.history?.filter((entry) => entry.voicemailId !== selected.selectedVoicemailId) ?? [];
+
+  function formatIntentScore(score) {
+    return `${Math.round((score ?? 0) * 100)}%`;
+  }
+
+  function getStatusNoteMeta(status) {
+    if (status === "Resolved") {
+      return {
+        label: "Resolution note",
+        prompt: "Enter how this call was resolved:",
+        emptyMessage: "A resolution reason is required before resolving this case.",
+        cardClassName: "border-emerald-200 bg-emerald-50",
+        labelClassName: "text-emerald-700",
+        bodyClassName: "text-emerald-900",
+      };
+    }
+
+    return {
+      label: "In progress note",
+      prompt: "Enter the current progress note for this call:",
+      emptyMessage: "A progress note is required before moving this case to in progress.",
+      cardClassName: "border-amber-200 bg-amber-50",
+      labelClassName: "text-amber-700",
+      bodyClassName: "text-amber-900",
+    };
+  }
+
+  function handleStatusChange(nextStatus) {
+    if (!selected || isSaving || nextStatus === selected.status) {
+      return;
+    }
+
+    if (
+      selected.status === "Resolved" &&
+      nextStatus !== "Resolved" &&
+      !window.confirm("This case is already resolved. Reopen it and continue?")
+    ) {
+      return;
+    }
+
+    if (nextStatus === "Resolved" || nextStatus === "In Progress") {
+      const noteMeta = getStatusNoteMeta(nextStatus);
+      const note = window.prompt(noteMeta.prompt, selected.resolutionNote || "");
+      if (note == null) {
+        return;
+      }
+
+      const trimmedNote = note.trim();
+      if (!trimmedNote) {
+        window.alert(noteMeta.emptyMessage);
+        return;
+      }
+
+      updateItem(selected.id, { status: nextStatus, resolutionNote: trimmedNote });
+      return;
+    }
+
+    updateItem(selected.id, { status: nextStatus });
+  }
+
+  function handleEditResolutionNote() {
+    if (!selected || isSaving || !["Resolved", "In Progress"].includes(selected.status)) {
+      return;
+    }
+
+    const noteMeta = getStatusNoteMeta(selected.status);
+    const note = window.prompt(`Edit ${noteMeta.label.toLowerCase()}:`, selected.resolutionNote || "");
+    if (note == null) {
+      return;
+    }
+
+    const trimmedNote = note.trim();
+    if (!trimmedNote) {
+      window.alert(`A ${noteMeta.label.toLowerCase()} cannot be blank while the case is ${selected.status.toLowerCase()}.`);
+      return;
+    }
+
+    updateItem(selected.id, { resolutionNote: trimmedNote });
+  }
+
   return (
     <Card className="rounded-2xl shadow-sm">
       <CardHeader className="pb-3">
-        <CardTitle className="text-lg">Structured item details</CardTitle>
+        <CardTitle className="text-lg">Voicemail details</CardTitle>
       </CardHeader>
       <CardContent>
         {selected ? (
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-2">
               <Badge className={urgencyStyles[selected.urgency]}>{selected.urgency}</Badge>
-              <Badge variant="outline">{selected.queue}</Badge>
               <Badge className={statusStyles[selected.status]}>{selected.status}</Badge>
-              <Badge variant="secondary">Confidence: {selected.confidence}</Badge>
             </div>
 
             <div>
@@ -27,22 +106,93 @@ export function VoicemailDetails({ selected, updateItem }) {
                 <span>{selected.phone}</span>
                 <span>{selected.location}</span>
                 <span>{selected.time}</span>
-                <span>{selected.intent}</span>
+              </div>
+              {selected.isHistoricalSelection && (
+                <p className="mt-2 text-xs font-medium italic tracking-wide text-slate-500">
+                  Viewing an earlier voicemail.
+                </p>
+              )}
+            </div>
+            <hr />
+            <div className="grid gap-0 sm:grid-cols-1">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Voicemail Summary</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Summary confidence: {selected.summaryConfidence}
+                </p>
+                <p className="mt-2 text-sm font-medium text-slate-900">{selected.summary}</p>
+                <p className="mt-2 text-sm text-slate-700">
+                  Primary intent: {selected.intent} ({formatIntentScore(selected.primaryIntentScore)})
+                </p>
+              </div>
+              <div className="rounded-2xl p-4">
+                {selected.intents?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium tracking-wide text-slate-500">
+                      Intents above {formatIntentScore(selected.intentThreshold)}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selected.intents.map((intent) => (
+                        <Badge key={intent.intentId} variant="secondary">
+                          {intent.label} {formatIntentScore(intent.score)}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-2xl bg-slate-50 p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">What matters</p>
-                <p className="mt-2 text-sm text-slate-700">{selected.summary}</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:grid-rows-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Primary GP</p>
+                <p className="mt-2 text-sm font-medium text-slate-900">{selected.primaryGp || "Unassigned"}</p>
               </div>
-              <div className="rounded-2xl bg-slate-50 p-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 row-span-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Recommended next step</p>
                 <p className="mt-2 text-sm font-medium text-slate-900">{selected.nextStep}</p>
-                <p className="mt-2 text-sm text-slate-600">Owner: {selected.owner}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Queue recommendation</p>
+                <p className="mt-2 text-sm font-medium text-slate-900">{selected.assignedGp || selected.owner}</p>
+                <p className="mt-2 text-sm text-slate-700">Queue reason: {selected.queue}</p>
               </div>
             </div>
 
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Caller history</p>
+              <p className="mt-2 text-sm font-medium text-slate-900">{selected.historicalContext}</p>
+              {selected.matchedUrgencyKeywords?.length > 0 && (
+                <p className="mt-2 text-sm text-slate-700">
+                  Clinic urgency keywords matched: {selected.matchedUrgencyKeywords.join(", ")}
+                </p>
+              )}
+              {selected.patientUrgencyMarker && (
+                <p className="mt-2 text-sm text-slate-700">
+                  GP urgency marker: {selected.patientUrgencyMarker.urgency} by {selected.patientUrgencyMarker.gpName}
+                  {selected.patientUrgencyMarker.note ? ` - ${selected.patientUrgencyMarker.note}` : ""}
+                </p>
+              )}
+            </div>
+
+            {selected.resolutionNote && ["Resolved", "In Progress"].includes(selected.status) && (
+              <div className={`rounded-2xl border p-4 ${getStatusNoteMeta(selected.status).cardClassName}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <p className={`text-xs font-medium uppercase tracking-wide ${getStatusNoteMeta(selected.status).labelClassName}`}>
+                    {getStatusNoteMeta(selected.status).label}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleEditResolutionNote}
+                    disabled={isSaving || !["Resolved", "In Progress"].includes(selected.status)}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" /> Edit
+                  </Button>
+                </div>
+                <p className={`mt-2 text-sm ${getStatusNoteMeta(selected.status).bodyClassName}`}>{selected.resolutionNote}</p>
+              </div>
+            )}
+            <hr />
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Transcript snapshot</p>
               <p className="mt-2 text-sm leading-6 text-slate-700">"{selected.transcript}"</p>
@@ -56,50 +206,66 @@ export function VoicemailDetails({ selected, updateItem }) {
               </div>
             </div>
 
+            {relatedHistory.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Other voicemails from this number</p>
+                <div className="mt-3 space-y-3">
+                  {relatedHistory.map((entry) => (
+                    <div key={entry.voicemailId} className="rounded-2xl bg-slate-50 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className={urgencyStyles[entry.urgency]}>{entry.urgency}</Badge>
+                        <Badge className={statusStyles[entry.status]}>{entry.status}</Badge>
+                        <span className="text-xs text-slate-500">{entry.time}</span>
+                        <span className="text-xs text-slate-500">{entry.age}</span>
+                      </div>
+                      <p className="mt-2 text-sm font-medium text-slate-900">{entry.reason}</p>
+                      <p className="mt-1 text-sm text-slate-600">{entry.summary}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Primary intent: {entry.intent} ({formatIntentScore(entry.primaryIntentScore)}) | Summary confidence: {entry.summaryConfidence}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-2xl border border-slate-200 p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Management actions</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button onClick={() => updateItem(selected.id, { status: "New" })} variant="outline">
-                  Mark new
-                </Button>
-                <Button onClick={() => updateItem(selected.id, { status: "In Progress" })} variant="outline">
-                  Start work
-                </Button>
-                <Button onClick={() => updateItem(selected.id, { status: "Resolved" })}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" /> Resolve
-                </Button>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Management actions</p>
+                {isSaving && <span className="text-xs text-slate-500">Saving to SQLite...</span>}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  onClick={() => updateItem(selected.id, { queue: "Clinical Triage", owner: "Nurse triage" })}
-                  variant="secondary"
-                >
-                  Send to nurse triage
+                <Button onClick={() => handleStatusChange("New")} variant="outline" disabled={isSaving}>
+                  New
                 </Button>
-                <Button
-                  onClick={() =>
-                    updateItem(selected.id, {
-                      queue: "Same-Day Appointments",
-                      owner: "Front desk",
-                      nextStep: "Offer same-day GP slot",
-                    })
-                  }
-                  variant="secondary"
-                >
-                  Book same-day slot
+                <Button onClick={() => handleStatusChange("In Progress")} variant="outline" disabled={isSaving}>
+                  In progress
                 </Button>
-                <Button
-                  onClick={() =>
-                    updateItem(selected.id, {
-                      queue: "GP Callbacks",
-                      owner: "Dr Lee",
-                      nextStep: "Add to doctor callback list",
-                    })
-                  }
-                  variant="secondary"
-                >
-                  Assign GP callback
+                <Button onClick={() => handleStatusChange("Resolved")} disabled={isSaving}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" /> Resolved
                 </Button>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Queue actions</p>
+              </div>
+              <div className="mt-3">
+                <select
+                  value={selected.queue}
+                  onChange={(event) => {
+                    const nextQueue = event.target.value;
+                    if (nextQueue !== selected.queue) {
+                      updateItem(selected.id, { queue: nextQueue });
+                    }
+                  }}
+                  disabled={isSaving}
+                  className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {queues.map((queue) => (
+                    <option key={queue} value={queue}>
+                      {queue}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

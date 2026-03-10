@@ -9,25 +9,29 @@ export function getCounts(items) {
   };
 }
 
-export function filterVoicemails(items, search, queueFilter, statusFilter, tab) {
+export function filterVoicemails(items, search, queueFilter, statusFilter, urgencyFilter, tab) {
   const query = search.toLowerCase();
 
   return items
     .filter((item) => {
+      const matchingIntentLabels = item.intents?.some((intent) => intent.label.toLowerCase().includes(query));
       const matchesSearch =
         item.patient.toLowerCase().includes(query) ||
+        item.phone.toLowerCase().includes(query) ||
         item.intent.toLowerCase().includes(query) ||
+        matchingIntentLabels ||
         item.reason.toLowerCase().includes(query) ||
         item.location.toLowerCase().includes(query);
       const matchesQueue = queueFilter === "all" || item.queue === queueFilter;
       const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchesUrgency = urgencyFilter === "all" || item.urgency === urgencyFilter;
       const matchesTab =
         tab === "all" ||
         (tab === "priority" && ["Critical", "High"].includes(item.urgency)) ||
-        (tab === "new" && item.status === "New") ||
+        (tab === "unresolved" && item.status !== "Resolved") ||
         (tab === "resolved" && item.status === "Resolved");
 
-      return matchesSearch && matchesQueue && matchesStatus && matchesTab;
+      return matchesSearch && matchesQueue && matchesStatus && matchesUrgency && matchesTab;
     })
     .sort(
       (a, b) =>
