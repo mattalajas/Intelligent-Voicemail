@@ -18,6 +18,7 @@ import {
   patientUrgencyMarkers,
   patients,
   queues,
+  rawVoicemails,
   structuredVoicemails,
   urgencyKeywords,
   voicemailAdminStates,
@@ -32,6 +33,7 @@ const dbPath = path.join(dataDir, "voicemail.sqlite");
 const schemaPaths = [
   path.join(__dirname, "schema", "clinic", "reference.sql"),
   path.join(__dirname, "schema", "clinicModel", "config.sql"),
+  path.join(__dirname, "schema", "voicemail", "raw.sql"),
   path.join(__dirname, "schema", "voicemail", "structured.sql"),
   path.join(__dirname, "schema", "ai", "proxyLookup.sql"),
   path.join(__dirname, "schema", "admin", "adminState.sql"),
@@ -271,6 +273,24 @@ function insertSeedData(db) {
       reason_for_call = excluded.reason_for_call,
       recommended_steps = excluded.recommended_steps
   `);
+  const insertRawVoicemail = db.prepare(`
+    INSERT INTO raw_voicemails (
+      caller_phone,
+      transcription,
+      clinic_id,
+      received_at,
+      patient_name
+    ) VALUES (
+      @callerPhone,
+      @transcription,
+      @clinicId,
+      @receivedAt,
+      @patientName
+    )
+    ON CONFLICT(caller_phone, clinic_id, received_at) DO UPDATE SET
+      transcription = excluded.transcription,
+      patient_name = excluded.patient_name
+  `);
   const insertVoicemailIntentClassification = db.prepare(`
     INSERT INTO voicemail_intent_classifications (voicemail_id, intent_id, classification_score, intent_label_snapshot)
     VALUES (@voicemailId, @intentId, @classificationScore, @intentLabelSnapshot)
@@ -314,6 +334,7 @@ function insertSeedData(db) {
     intentQueueRoutes.forEach((row) => insertIntentQueueRoute.run(row));
     urgencyKeywords.forEach((row) => insertUrgencyKeyword.run(row));
     patientUrgencyMarkers.forEach((row) => insertPatientUrgencyMarker.run(row));
+    rawVoicemails.forEach((row) => insertRawVoicemail.run(row));
     structuredVoicemails.forEach((row) => insertStructuredVoicemail.run(row));
     voicemailIntentClassifications.forEach((row) => insertVoicemailIntentClassification.run(row));
     voicemailUrgencyKeywordSimilarities.forEach((row) => insertVoicemailUrgencyKeywordSimilarity.run(row));
@@ -688,6 +709,10 @@ function buildVoicemailModelInput(row, rowsByPhone, intentCandidates, keywordUrg
 
 function mapVoicemailRow(row) {
   const modelOutput = row.aiWorkflow.output;
+  const transcript = row.transcript ?? "";
+  const hasTranscriptSnapshot = transcript.trim().length > 0;
+  const reason = modelOutput.reason?.trim() || "AI transcription unavailable. Review audio before triage.";
+  const summary = modelOutput.summary?.trim() || "No structured summary available because the transcription model did not respond.";
 
   return {
     id: row.phone,
@@ -711,12 +736,13 @@ function mapVoicemailRow(row) {
     status: row.status,
     intentConfidence: modelOutput.intentConfidence,
     transcriptionConfidence: modelOutput.transcriptionConfidence,
-    reason: modelOutput.reason,
-    summary: modelOutput.summary,
+    reason,
+    summary,
     nextStep: modelOutput.nextStep,
     resolutionNote: row.status_note ?? "",
     resolutionNoteType: row.status_note_type ?? null,
-    transcript: row.transcript,
+    transcript,
+    hasTranscriptSnapshot,
     patientDateOfBirth: row.patient_date_of_birth,
     primaryGp: row.primary_gp_name,
     assignedGp: row.assigned_gp_name,
@@ -727,6 +753,10 @@ function mapVoicemailRow(row) {
 
 function buildHistoryEntry(row) {
   const modelOutput = row.aiWorkflow.output;
+  const transcript = row.transcript ?? "";
+  const hasTranscriptSnapshot = transcript.trim().length > 0;
+  const reason = modelOutput.reason?.trim() || "AI transcription unavailable. Review audio before triage.";
+  const summary = modelOutput.summary?.trim() || "No structured summary available because the transcription model did not respond.";
 
   return {
     voicemailId: row.id,
@@ -744,11 +774,12 @@ function buildHistoryEntry(row) {
     status: row.status,
     intentConfidence: modelOutput.intentConfidence,
     transcriptionConfidence: modelOutput.transcriptionConfidence,
-    reason: modelOutput.reason,
-    summary: modelOutput.summary,
+    reason,
+    summary,
     resolutionNote: row.status_note ?? "",
     resolutionNoteType: row.status_note_type ?? null,
-    transcript: row.transcript,
+    transcript,
+    hasTranscriptSnapshot,
     patientDateOfBirth: row.patient_date_of_birth,
     nextStep: modelOutput.nextStep,
     aiWorkflow: row.aiWorkflow,
@@ -905,6 +936,25 @@ export function initDatabase() {
   syncUrgencyKeywordSimilarityLookups(db);
 
   return db;
+}
+
+export function getRawVoicemails(db) {
+  return db
+    .prepare(
+      `
+        SELECT
+          rv.caller_phone AS callerPhone,
+          rv.transcription,
+          rv.clinic_id AS clinicId,
+          c.name AS clinicName,
+          rv.received_at AS receivedAt,
+          rv.patient_name AS patientName
+        FROM raw_voicemails rv
+        JOIN clinics c ON c.id = rv.clinic_id
+        ORDER BY datetime(rv.received_at) DESC, rv.caller_phone ASC
+      `,
+    )
+    .all();
 }
 
 export function getVoicemails(db) {

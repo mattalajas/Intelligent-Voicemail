@@ -1,5 +1,5 @@
 import React from "react";
-import { Pencil, Phone, Play } from "lucide-react";
+import { Pencil, Phone, Play, RefreshCw } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -15,6 +15,7 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
   const relatedHistory = selected?.history?.filter((entry) => entry.voicemailId !== selected.selectedVoicemailId) ?? [];
   const hasUrgencyKeywordMatches = (selected?.matchedUrgencyKeywords?.length ?? 0) > 0;
   const hasPatientUrgencyMarker = Boolean(selected?.patientUrgencyMarker);
+  const hasTranscriptSnapshot = Boolean(selected?.hasTranscriptSnapshot);
 
   function formatDateOfBirth(dateOfBirth) {
     if (!dateOfBirth) {
@@ -39,6 +40,14 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
 
   function formatUrgencyKeywordMatch(match) {
     return `${match.keyword} (${match.urgency}, ${formatIntentScore(match.score)})`;
+  }
+
+  function renderPrimaryIntent(intentLabel, score) {
+    if (intentLabel === "Unknown") {
+      return intentLabel;
+    }
+
+    return `${intentLabel} (${formatIntentScore(score)})`;
   }
 
   function getStatusNoteMeta(status) {
@@ -160,8 +169,13 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                   Transcript confidence: {selected.transcriptionConfidence}
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-900">{selected.summary}</p>
+                {!hasTranscriptSnapshot && (
+                  <p className="mt-2 text-sm text-amber-700">
+                    AI transcription is currently unavailable for this voicemail. Caller details are still shown from the matched patient record.
+                  </p>
+                )}
                 <p className="mt-2 text-sm text-slate-700">
-                  Primary intent: {selected.intent} ({formatIntentScore(selected.primaryIntentScore)})
+                  Primary intent: {renderPrimaryIntent(selected.intent, selected.primaryIntentScore)}
                 </p>
               </div>
               <div className="rounded-2xl p-4">
@@ -246,14 +260,16 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
             <hr />
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Transcript snapshot</p>
-              <p className="mt-2 text-sm leading-6 text-slate-700">"{selected.transcript}"</p>
+              {hasTranscriptSnapshot && <p className="mt-3 text-sm leading-6 text-slate-700">"{selected.transcript}"</p>}
               <div className="mt-3 flex items-center gap-2">
                 <Button variant="outline" size="sm">
                   <Play className="mr-2 h-4 w-4" /> Play audio
                 </Button>
-                <Button variant="outline" size="sm">
-                  <Phone className="mr-2 h-4 w-4" /> Return call
-                </Button>
+                {!hasTranscriptSnapshot && (
+                  <Button variant="outline" size="sm" onClick={() => {}}>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Refresh AI
+                  </Button>
+                )}
               </div>
             </div>
 

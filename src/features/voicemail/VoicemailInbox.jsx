@@ -1,10 +1,34 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { ChevronRight, ClipboardList, UserRound } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { getOwnerLabelStyle, queueIcons, statusStyles, urgencyStyles } from "./constants";
 
 export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId, onSelectVoicemail }) {
+  const [panelHeight, setPanelHeight] = useState(720);
+  const [isResizableViewport, setIsResizableViewport] = useState(false);
+
+  useEffect(() => {
+    function syncHeightToViewport() {
+      const canResize = window.innerWidth >= 1024;
+      setIsResizableViewport(canResize);
+
+      if (!canResize) {
+        return;
+      }
+
+      const nextMaxHeight = Math.max(1024, window.innerHeight - 180);
+      setPanelHeight((current) => Math.min(current, nextMaxHeight));
+    }
+
+    syncHeightToViewport();
+    window.addEventListener("resize", syncHeightToViewport);
+
+    return () => {
+      window.removeEventListener("resize", syncHeightToViewport);
+    };
+  }, []);
+
   function formatIntentSummary(item) {
     if (!item.intents?.length) {
       return item.intent;
@@ -13,15 +37,44 @@ export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId,
     return item.intents.length > 1 ? `${item.intent} +${item.intents.length - 1} more` : item.intent;
   }
 
+  function handleResizeStart(event) {
+    if (!isResizableViewport) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const startY = event.clientY;
+    const startHeight = panelHeight;
+    const minHeight = 420;
+    const maxHeight = Math.max(1024, window.innerHeight - 180);
+
+    function handlePointerMove(moveEvent) {
+      const nextHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + (moveEvent.clientY - startY)));
+      setPanelHeight(nextHeight);
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
+
   return (
-    <Card className="rounded-2xl shadow-sm">
+    <Card
+      className="rounded-2xl shadow-sm lg:flex lg:flex-col lg:overflow-hidden"
+      style={isResizableViewport ? { height: `${panelHeight}px` } : undefined}
+    >
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between text-lg">
           <span>Voicemail inbox</span>
           <span className="text-sm font-normal text-slate-500">{filtered.length} items shown</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-4">
         {filtered.map((item) => {
           const QueueIcon = queueIcons[item.queue] || ClipboardList;
           const isGroupActive = selectedGroupId === item.id;
@@ -47,6 +100,9 @@ export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId,
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge className={urgencyStyles[item.urgency]}>{item.urgency}</Badge>
                       <Badge className={statusStyles[item.status]}>{item.status}</Badge>
+                      {!item.hasTranscriptSnapshot && (
+                        <Badge className="border border-neutral-200 bg-neutral-200 text-neutral-800">AI unavailable</Badge>
+                      )}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -98,6 +154,9 @@ export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId,
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge className={urgencyStyles[entry.urgency]}>{entry.urgency}</Badge>
                             <Badge className={statusStyles[entry.status]}>{entry.status}</Badge>
+                            {!entry.hasTranscriptSnapshot && (
+                              <Badge className="border border-amber-200 bg-amber-50 text-amber-800">AI unavailable</Badge>
+                            )}
                             <span className="text-xs text-slate-500">{entry.time}</span>
                             <span className="text-xs text-slate-500">{entry.age}</span>
                           </div>
@@ -122,6 +181,13 @@ export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId,
           </div>
         )}
       </CardContent>
+      <div
+        role="presentation"
+        onPointerDown={handleResizeStart}
+        className="hidden h-5 cursor-row-resize touch-none border-t border-slate-200 bg-slate-50 select-none lg:flex lg:items-center lg:justify-center"
+      >
+        <div className="h-1.5 w-12 rounded-full bg-slate-300" />
+      </div>
     </Card>
   );
 }

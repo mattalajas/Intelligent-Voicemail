@@ -8,6 +8,7 @@ import {
   getIntents,
   getPatientUrgencyMarkers,
   getQueues,
+  getRawVoicemails,
   getStructuredVoicemailTranscriptionsByPhone,
   getUrgencyKeywords,
   getVoicemailIntentClassification,
@@ -35,6 +36,10 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/voicemails", (_req, res) => {
   res.json({ items: getVoicemails(db) });
+});
+
+app.get("/api/raw-voicemails", (_req, res) => {
+  res.json({ items: getRawVoicemails(db) });
 });
 
 app.get("/api/voicemails/:voicemailId/intents", (req, res) => {

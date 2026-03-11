@@ -38,7 +38,9 @@ function buildSelectedVoicemail(group, voicemailId) {
     reason: selectedEntry.reason,
     summary: selectedEntry.summary,
     transcript: selectedEntry.transcript,
+    hasTranscriptSnapshot: selectedEntry.hasTranscriptSnapshot,
     transcriptionConfidence: selectedEntry.transcriptionConfidence,
+    nextStep: selectedEntry.nextStep,
   };
 }
 

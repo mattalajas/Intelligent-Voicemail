@@ -1,5 +1,7 @@
 export const INTENT_CLASSIFICATION_THRESHOLD = 0.6;
 export const PROTOTYPE_VOICEMAIL_MODEL = "prototype-voicemail-proxy";
+export const AI_TRANSCRIPT_UNAVAILABLE_NEXT_STEP =
+  "Retry AI transcription. If still unavailable, play the recording for manual review.";
 
 export function scoreToConfidenceLabel(score) {
   if (score >= 0.85) {
@@ -71,6 +73,14 @@ function runUrgencyStage(input) {
 }
 
 function runNextStepStage(input) {
+  if (!String(input.transcript || "").trim()) {
+    return {
+      stage: "next_step_suggestion",
+      nextStep: AI_TRANSCRIPT_UNAVAILABLE_NEXT_STEP,
+      source: "missing transcript fallback",
+    };
+  }
+
   return {
     stage: "next_step_suggestion",
     nextStep: input.proxy.nextStep,

@@ -2,6 +2,15 @@ import { intents, urgencyKeywords } from "../clinicModel/configData.js";
 import { structuredVoicemails } from "../voicemail/structuredData.js";
 
 const seededVoicemailIntentClassifications = [
+  { voicemailId: "VM-1046", intentId: 5, classificationScore: 0.58 },
+  { voicemailId: "VM-1046", intentId: 1, classificationScore: 0.54 },
+  { voicemailId: "VM-1046", intentId: 7, classificationScore: 0.49 },
+  { voicemailId: "VM-1045", intentId: 7, classificationScore: 0.29 },
+  { voicemailId: "VM-1045", intentId: 8, classificationScore: 0.21 },
+  { voicemailId: "VM-1045", intentId: 3, classificationScore: 0.17 },
+  { voicemailId: "VM-1044", intentId: 3, classificationScore: 0.32 },
+  { voicemailId: "VM-1044", intentId: 2, classificationScore: 0.24 },
+  { voicemailId: "VM-1044", intentId: 7, classificationScore: 0.18 },
   { voicemailId: "VM-1042", intentId: 1, classificationScore: 0.97 },
   { voicemailId: "VM-1042", intentId: 3, classificationScore: 0.66 },
   { voicemailId: "VM-1042", intentId: 7, classificationScore: 0.48 },
@@ -85,6 +94,15 @@ export const voicemailIntentClassifications = structuredVoicemails.flatMap(({ vo
 });
 
 const seededVoicemailUrgencyKeywordSimilarities = [
+  { voicemailId: "VM-1046", urgencyKeywordId: 7, similarityScore: 0.42 },
+  { voicemailId: "VM-1046", urgencyKeywordId: 4, similarityScore: 0.27 },
+  { voicemailId: "VM-1046", urgencyKeywordId: 8, similarityScore: 0.11 },
+  { voicemailId: "VM-1045", urgencyKeywordId: 7, similarityScore: 0.14 },
+  { voicemailId: "VM-1045", urgencyKeywordId: 9, similarityScore: 0.09 },
+  { voicemailId: "VM-1045", urgencyKeywordId: 1, similarityScore: 0.07 },
+  { voicemailId: "VM-1044", urgencyKeywordId: 1, similarityScore: 0.19 },
+  { voicemailId: "VM-1044", urgencyKeywordId: 4, similarityScore: 0.16 },
+  { voicemailId: "VM-1044", urgencyKeywordId: 6, similarityScore: 0.12 },
   { voicemailId: "VM-1042", urgencyKeywordId: 1, similarityScore: 0.98 },
   { voicemailId: "VM-1042", urgencyKeywordId: 2, similarityScore: 0.96 },
   { voicemailId: "VM-1042", urgencyKeywordId: 10, similarityScore: 0.93 },
