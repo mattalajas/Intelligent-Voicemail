@@ -3,12 +3,35 @@ import { Pencil, Phone, Play } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { statusActionStyles, statusStyles, urgencyStyles } from "./constants";
+import {
+  getOwnerLabelStyle,
+  getOwnerRecommendationBoxStyle,
+  statusActionStyles,
+  statusStyles,
+  urgencyStyles,
+} from "./constants";
 
 export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
   const relatedHistory = selected?.history?.filter((entry) => entry.voicemailId !== selected.selectedVoicemailId) ?? [];
   const hasUrgencyKeywordMatches = (selected?.matchedUrgencyKeywords?.length ?? 0) > 0;
   const hasPatientUrgencyMarker = Boolean(selected?.patientUrgencyMarker);
+
+  function formatDateOfBirth(dateOfBirth) {
+    if (!dateOfBirth) {
+      return "";
+    }
+
+    const parsedDate = new Date(dateOfBirth);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return dateOfBirth;
+    }
+
+    return parsedDate.toLocaleDateString("en-NZ", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
 
   function formatIntentScore(score) {
     return `${Math.round((score ?? 0) * 100)}%`;
@@ -119,6 +142,7 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
               <h2 className="text-2xl font-semibold text-slate-900">{selected.patient}</h2>
               <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
                 <span>{selected.phone}</span>
+                {selected.patientDateOfBirth && <span>DOB: {formatDateOfBirth(selected.patientDateOfBirth)}</span>}
                 <span>{selected.location}</span>
                 <span>{selected.time}</span>
               </div>
@@ -183,9 +207,15 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                   </p>
                 )}
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div
+                className={`rounded-2xl border p-4 ${getOwnerRecommendationBoxStyle(selected.assignedGp || selected.owner)}`}
+              >
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Queue recommendation</p>
-                <p className="mt-2 text-sm font-medium text-slate-900">{selected.assignedGp || selected.owner}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge className={getOwnerLabelStyle(selected.assignedGp || selected.owner)}>
+                    {selected.assignedGp || selected.owner}
+                  </Badge>
+                </div>
                 <p className="mt-2 text-sm text-slate-700">Queue reason: {selected.queue}</p>
               </div>
             </div>

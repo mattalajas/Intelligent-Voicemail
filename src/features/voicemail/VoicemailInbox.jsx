@@ -2,7 +2,7 @@ import React from "react";
 import { ChevronRight, ClipboardList, UserRound } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { queueIcons, statusStyles, urgencyStyles } from "./constants";
+import { getOwnerLabelStyle, queueIcons, statusStyles, urgencyStyles } from "./constants";
 
 export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId, onSelectVoicemail }) {
   function formatIntentSummary(item) {
@@ -62,7 +62,8 @@ export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId,
                     </div>
                     <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
                       <div className="flex items-center gap-1">
-                        <QueueIcon className="h-4 w-4" /> {item.owner}
+                        <QueueIcon className="h-4 w-4" />
+                        <Badge className={getOwnerLabelStyle(item.owner)}>{item.owner}</Badge>
                       </div>
                       <div>{item.time}</div>
                       <div>{formatIntentSummary(item)}</div>

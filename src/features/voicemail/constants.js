@@ -37,6 +37,56 @@ export const statusActionStyles = {
   },
 };
 
+export const ownerLabelStyles = {
+  nurseTriage: "border border-cyan-200 bg-cyan-50 text-cyan-800",
+  gpReview: "border border-violet-200 bg-violet-50 text-violet-800",
+  frontDesk: "border border-amber-200 bg-amber-50 text-amber-800",
+  default: "border border-slate-200 bg-slate-100 text-slate-700",
+};
+
+export const ownerRecommendationBoxStyles = {
+  nurseTriage: "border-cyan-200 bg-cyan-50",
+  gpReview: "border-violet-200 bg-violet-50",
+  frontDesk: "border-amber-200 bg-amber-50",
+  default: "border-slate-200 bg-slate-50",
+};
+
+export function getOwnerLabelStyle(ownerLabel) {
+  const normalizedLabel = String(ownerLabel || "").trim();
+
+  if (normalizedLabel === "Nurse triage") {
+    return ownerLabelStyles.nurseTriage;
+  }
+
+  if (normalizedLabel === "Front desk") {
+    return ownerLabelStyles.frontDesk;
+  }
+
+  if (normalizedLabel === "GP review" || /^Dr\b/i.test(normalizedLabel)) {
+    return ownerLabelStyles.gpReview;
+  }
+
+  return ownerLabelStyles.default;
+}
+
+export function getOwnerRecommendationBoxStyle(ownerLabel) {
+  const normalizedLabel = String(ownerLabel || "").trim();
+
+  if (normalizedLabel === "Nurse triage") {
+    return ownerRecommendationBoxStyles.nurseTriage;
+  }
+
+  if (normalizedLabel === "Front desk") {
+    return ownerRecommendationBoxStyles.frontDesk;
+  }
+
+  if (normalizedLabel === "GP review" || /^Dr\b/i.test(normalizedLabel)) {
+    return ownerRecommendationBoxStyles.gpReview;
+  }
+
+  return ownerRecommendationBoxStyles.default;
+}
+
 export const queueIcons = {
   "Emergency Review": AlertTriangle,
   "Clinical Triage": Stethoscope,

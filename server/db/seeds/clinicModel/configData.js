@@ -7,7 +7,6 @@ export const queues = [
   { id: 6, name: "Admin Requests", clinicId: null, isSystem: 1, defaultOwnerLabel: "Front desk" },
   { id: 7, name: "Needs Review", clinicId: null, isSystem: 1, defaultOwnerLabel: "Front desk" },
   { id: 8, name: "Test Results", clinicId: null, isSystem: 1, defaultOwnerLabel: "Nurse triage" },
-  { id: 9, name: "Referral Coordination", clinicId: 3, isSystem: 0, defaultOwnerLabel: "Front desk" },
 ];
 
 export const intents = [

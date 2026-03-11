@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS gps (
 CREATE TABLE IF NOT EXISTS patients (
   id INTEGER PRIMARY KEY,
   full_name TEXT NOT NULL,
+  date_of_birth TEXT NOT NULL,
   phone TEXT NOT NULL,
   clinic_id INTEGER NOT NULL,
   FOREIGN KEY (clinic_id) REFERENCES clinics(id)

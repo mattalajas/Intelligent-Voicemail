@@ -39,10 +39,6 @@ export function VoicemailFilters({
                 className="pl-9"
               />
             </div>
-            <div className="hidden items-center gap-2 text-sm text-slate-500 lg:flex">
-              <Filter className="h-4 w-4" />
-              Filters
-            </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <select

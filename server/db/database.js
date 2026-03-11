@@ -79,6 +79,16 @@ function getColumnNames(db, tableName) {
   );
 }
 
+function ensureReferenceCompatibility(db) {
+  const patientColumns = getColumnNames(db, "patients");
+  if (!patientColumns.has("date_of_birth")) {
+    db.exec(`
+      ALTER TABLE patients
+      ADD COLUMN date_of_birth TEXT NOT NULL DEFAULT '1900-01-01'
+    `);
+  }
+}
+
 function ensureTaxonomyCompatibility(db) {
   const intentColumns = getColumnNames(db, "intents");
   if (!intentColumns.has("is_active")) {
@@ -167,9 +177,15 @@ function defaultUrgencySimilarityScore(voicemailId, urgencyKeywordId, urgency) {
 function insertSeedData(db) {
   const insertClinic = db.prepare("INSERT OR IGNORE INTO clinics (id, name) VALUES (@id, @name)");
   const insertGp = db.prepare("INSERT OR IGNORE INTO gps (id, name, clinic_id, specialty) VALUES (@id, @name, @clinicId, @specialty)");
-  const insertPatient = db.prepare(
-    "INSERT OR IGNORE INTO patients (id, full_name, phone, clinic_id) VALUES (@id, @fullName, @phone, @clinicId)",
-  );
+  const insertPatient = db.prepare(`
+    INSERT INTO patients (id, full_name, date_of_birth, phone, clinic_id)
+    VALUES (@id, @fullName, @dateOfBirth, @phone, @clinicId)
+    ON CONFLICT(id) DO UPDATE SET
+      full_name = excluded.full_name,
+      date_of_birth = excluded.date_of_birth,
+      phone = excluded.phone,
+      clinic_id = excluded.clinic_id
+  `);
   const insertRelationship = db.prepare(
     "INSERT OR IGNORE INTO patient_gp_relationships (patient_id, gp_id, relationship_type, is_primary) VALUES (@patientId, @gpId, @relationshipType, @isPrimary)",
   );
@@ -546,6 +562,7 @@ function getStructuredVoicemailRecord(db, voicemailId) {
           sv.clinic_id AS clinicId,
           sv.patient_id AS patientId,
           COALESCE(p.full_name, sv.caller_name, 'Unknown caller') AS patientName,
+          p.date_of_birth AS patientDateOfBirth,
           c.name AS clinicName,
           sv.caller_name AS callerName,
           sv.caller_phone AS callerPhone,
@@ -676,6 +693,7 @@ function mapVoicemailRow(row) {
     id: row.phone,
     latestVoicemailId: row.id,
     patient: row.patient_name,
+    patientDateOfBirth: row.patient_date_of_birth,
     location: row.location,
     phone: row.phone,
     time: formatTimeLabel(row.received_at),
@@ -699,6 +717,7 @@ function mapVoicemailRow(row) {
     resolutionNote: row.status_note ?? "",
     resolutionNoteType: row.status_note_type ?? null,
     transcript: row.transcript,
+    patientDateOfBirth: row.patient_date_of_birth,
     primaryGp: row.primary_gp_name,
     assignedGp: row.assigned_gp_name,
     patientClinic: row.location,
@@ -730,6 +749,7 @@ function buildHistoryEntry(row) {
     resolutionNote: row.status_note ?? "",
     resolutionNoteType: row.status_note_type ?? null,
     transcript: row.transcript,
+    patientDateOfBirth: row.patient_date_of_birth,
     nextStep: modelOutput.nextStep,
     aiWorkflow: row.aiWorkflow,
   };
@@ -878,6 +898,7 @@ export function initDatabase() {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(schemaSql);
+  ensureReferenceCompatibility(db);
   ensureTaxonomyCompatibility(db);
   insertSeedData(db);
   syncIntentClassificationLookups(db);
@@ -947,6 +968,7 @@ export function getVoicemails(db) {
       sv.clinic_id,
       sv.patient_id,
       COALESCE(p.full_name, sv.caller_name, 'Unknown caller') AS patient_name,
+      p.date_of_birth AS patient_date_of_birth,
       c.name AS location,
       sv.caller_phone AS phone,
       sv.received_at,
@@ -1177,6 +1199,7 @@ export function getStructuredVoicemailTranscription(db, voicemailId) {
     voicemailId: structuredVoicemail.voicemailId,
     patientId: structuredVoicemail.patientId,
     patientName: structuredVoicemail.patientName,
+    patientDateOfBirth: structuredVoicemail.patientDateOfBirth,
     clinicId: structuredVoicemail.clinicId,
     clinicName: structuredVoicemail.clinicName,
     receivedAt: structuredVoicemail.receivedAt,

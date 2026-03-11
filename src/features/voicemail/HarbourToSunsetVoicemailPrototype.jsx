@@ -159,10 +159,6 @@ export default function HarbourToSunsetVoicemailPrototype() {
           <div>
             <p className="text-sm font-medium text-slate-500">Heidi Calls - Harbour to Sunset GP</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">Morning Voicemail Dashboard</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Turn overnight voicemails into structured work for admin, nurse, and GP teams. Prioritised items are shown first,
-              with suggested next steps and clear ownership.
-            </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
             <div className="flex items-center gap-2 text-slate-700">
