@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS queues (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   clinic_id INTEGER,
-  is_system INTEGER NOT NULL DEFAULT 0,
+  is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
   default_owner_label TEXT NOT NULL,
   UNIQUE(name, clinic_id),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id)
@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS intents (
   id INTEGER PRIMARY KEY,
   label TEXT NOT NULL,
   clinic_id INTEGER,
-  is_system INTEGER NOT NULL DEFAULT 0,
+  is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   UNIQUE(label, clinic_id),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id)
 );
@@ -32,7 +33,8 @@ CREATE TABLE IF NOT EXISTS urgency_keywords (
   clinic_id INTEGER,
   urgency TEXT NOT NULL,
   keyword TEXT NOT NULL,
-  is_system INTEGER NOT NULL DEFAULT 0,
+  is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   UNIQUE(clinic_id, urgency, keyword),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id)
 );
@@ -43,7 +45,7 @@ CREATE TABLE IF NOT EXISTS patient_urgency_markers (
   gp_id INTEGER NOT NULL,
   urgency TEXT NOT NULL,
   note TEXT,
-  is_active INTEGER NOT NULL DEFAULT 1,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   UNIQUE(patient_id, gp_id),
   FOREIGN KEY (patient_id) REFERENCES patients(id),
   FOREIGN KEY (gp_id) REFERENCES gps(id)

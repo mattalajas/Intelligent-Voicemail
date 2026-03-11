@@ -11,15 +11,15 @@ export const queues = [
 ];
 
 export const intents = [
-  { id: 1, label: "Symptom concern", clinicId: null, isSystem: 1 },
-  { id: 2, label: "Medication reaction", clinicId: null, isSystem: 1 },
-  { id: 3, label: "Doctor callback", clinicId: null, isSystem: 1 },
-  { id: 4, label: "Appointment request", clinicId: null, isSystem: 1 },
-  { id: 5, label: "Prescription request", clinicId: null, isSystem: 1 },
-  { id: 6, label: "Test results query", clinicId: null, isSystem: 1 },
-  { id: 7, label: "General callback", clinicId: null, isSystem: 1 },
-  { id: 8, label: "Administrative request", clinicId: null, isSystem: 1 },
-  { id: 9, label: "Referral follow-up", clinicId: 3, isSystem: 0 },
+  { id: 1, label: "Symptom concern", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 2, label: "Medication reaction", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 3, label: "Doctor callback", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 4, label: "Appointment request", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 5, label: "Prescription request", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 6, label: "Test results query", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 7, label: "General callback", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 8, label: "Administrative request", clinicId: null, isSystem: 1, isActive: 1 },
+  { id: 9, label: "Referral follow-up", clinicId: 3, isSystem: 0, isActive: 1 },
 ];
 
 export const intentQueueRoutes = [
@@ -50,19 +50,19 @@ export const intentQueueRoutes = [
 ];
 
 export const urgencyKeywords = [
-  { id: 1, clinicId: null, urgency: "Critical", keyword: "chest pain", isSystem: 1 },
-  { id: 2, clinicId: null, urgency: "Critical", keyword: "short of breath", isSystem: 1 },
-  { id: 3, clinicId: null, urgency: "Critical", keyword: "light-headed", isSystem: 1 },
-  { id: 4, clinicId: null, urgency: "High", keyword: "rash", isSystem: 1 },
-  { id: 5, clinicId: null, urgency: "High", keyword: "high fever", isSystem: 1 },
-  { id: 6, clinicId: null, urgency: "High", keyword: "worse", isSystem: 1 },
-  { id: 7, clinicId: null, urgency: "Normal", keyword: "prescription", isSystem: 1 },
-  { id: 8, clinicId: null, urgency: "Normal", keyword: "test results", isSystem: 1 },
-  { id: 9, clinicId: null, urgency: "Low", keyword: "medical certificate", isSystem: 1 },
-  { id: 10, clinicId: 1, urgency: "Critical", keyword: "trouble breathing", isSystem: 0 },
-  { id: 11, clinicId: 3, urgency: "High", keyword: "spreading", isSystem: 0 },
-  { id: 12, clinicId: 2, urgency: "High", keyword: "same day", isSystem: 0 },
-  { id: 13, clinicId: 2, urgency: "High", keyword: "infant", isSystem: 0 },
+  { id: 1, clinicId: null, urgency: "Critical", keyword: "chest pain", isSystem: 1, isActive: 1 },
+  { id: 2, clinicId: null, urgency: "Critical", keyword: "short of breath", isSystem: 1, isActive: 1 },
+  { id: 3, clinicId: null, urgency: "Critical", keyword: "light-headed", isSystem: 1, isActive: 1 },
+  { id: 4, clinicId: null, urgency: "High", keyword: "rash", isSystem: 1, isActive: 1 },
+  { id: 5, clinicId: null, urgency: "High", keyword: "high fever", isSystem: 1, isActive: 1 },
+  { id: 6, clinicId: null, urgency: "High", keyword: "worse", isSystem: 1, isActive: 1 },
+  { id: 7, clinicId: null, urgency: "Normal", keyword: "prescription", isSystem: 1, isActive: 1 },
+  { id: 8, clinicId: null, urgency: "Normal", keyword: "test results", isSystem: 1, isActive: 1 },
+  { id: 9, clinicId: null, urgency: "Low", keyword: "medical certificate", isSystem: 1, isActive: 1 },
+  { id: 10, clinicId: 1, urgency: "Critical", keyword: "trouble breathing", isSystem: 0, isActive: 1 },
+  { id: 11, clinicId: 3, urgency: "High", keyword: "spreading", isSystem: 0, isActive: 1 },
+  { id: 12, clinicId: 2, urgency: "High", keyword: "same day", isSystem: 0, isActive: 1 },
+  { id: 13, clinicId: 2, urgency: "High", keyword: "infant", isSystem: 0, isActive: 1 },
 ];
 
 export const patientUrgencyMarkers = [

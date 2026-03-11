@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS patient_gp_relationships (
   patient_id INTEGER NOT NULL,
   gp_id INTEGER NOT NULL,
   relationship_type TEXT NOT NULL,
-  is_primary INTEGER NOT NULL DEFAULT 0,
+  is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
   PRIMARY KEY (patient_id, gp_id),
   FOREIGN KEY (patient_id) REFERENCES patients(id),
   FOREIGN KEY (gp_id) REFERENCES gps(id)

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   INTENT_CLASSIFICATION_THRESHOLD,
+  PROTOTYPE_VOICEMAIL_MODEL,
   runPrototypeVoicemailModel,
   scoreToConfidenceLabel,
 } from "../ai/prototypeVoicemailModel.js";
@@ -16,12 +17,12 @@ import {
   patientGpRelationships,
   patientUrgencyMarkers,
   patients,
-  proxyAiVoicemailOutputs,
   queues,
+  structuredVoicemails,
   urgencyKeywords,
   voicemailAdminStates,
   voicemailIntentClassifications,
-  voicemailMessages,
+  voicemailUrgencyKeywordSimilarities,
 } from "./seedData.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,12 +32,13 @@ const dbPath = path.join(dataDir, "voicemail.sqlite");
 const schemaPaths = [
   path.join(__dirname, "schema", "clinic", "reference.sql"),
   path.join(__dirname, "schema", "clinicModel", "config.sql"),
-  path.join(__dirname, "schema", "voicemail", "raw.sql"),
+  path.join(__dirname, "schema", "voicemail", "structured.sql"),
   path.join(__dirname, "schema", "ai", "proxyLookup.sql"),
   path.join(__dirname, "schema", "admin", "adminState.sql"),
 ];
 const schemaSql = schemaPaths.map((schemaFilePath) => readFileSync(schemaFilePath, "utf8")).join("\n\n");
 const standardIntentLabels = new Set(intents.filter((item) => item.clinicId == null).map((item) => item.label));
+const URGENCY_KEYWORD_SIMILARITY_THRESHOLD = 0.6;
 const urgencyRank = {
   Critical: 0,
   High: 1,
@@ -44,10 +46,22 @@ const urgencyRank = {
   Low: 3,
   Unknown: 4,
 };
-const confidenceScoreByLabel = {
-  High: 0.92,
-  Medium: 0.74,
-  Low: 0.55,
+const lowConfidenceScoreByIntentId = {
+  1: 0.11,
+  2: 0.09,
+  3: 0.1,
+  4: 0.08,
+  5: 0.07,
+  6: 0.08,
+  7: 0.12,
+  8: 0.06,
+  9: 0.05,
+};
+const lowUrgencySimilarityScoreByUrgency = {
+  Critical: 0.12,
+  High: 0.1,
+  Normal: 0.08,
+  Low: 0.06,
 };
 
 function ensureDataDir() {
@@ -56,8 +70,98 @@ function ensureDataDir() {
   }
 }
 
-function confidenceLabelToScore(label) {
-  return confidenceScoreByLabel[label] ?? 0.5;
+function getColumnNames(db, tableName) {
+  return new Set(
+    db
+      .prepare(`PRAGMA table_info(${tableName})`)
+      .all()
+      .map((column) => column.name),
+  );
+}
+
+function ensureTaxonomyCompatibility(db) {
+  const intentColumns = getColumnNames(db, "intents");
+  if (!intentColumns.has("is_active")) {
+    db.exec(`
+      ALTER TABLE intents
+      ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
+    `);
+  }
+
+  const urgencyKeywordColumns = getColumnNames(db, "urgency_keywords");
+  if (!urgencyKeywordColumns.has("is_active")) {
+    db.exec(`
+      ALTER TABLE urgency_keywords
+      ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
+    `);
+  }
+
+  const intentClassificationColumns = getColumnNames(db, "voicemail_intent_classifications");
+  if (!intentClassificationColumns.has("intent_label_snapshot")) {
+    db.exec(`
+      ALTER TABLE voicemail_intent_classifications
+      ADD COLUMN intent_label_snapshot TEXT NOT NULL DEFAULT ''
+    `);
+  }
+
+  const urgencySimilarityColumns = getColumnNames(db, "voicemail_urgency_keyword_similarities");
+  if (!urgencySimilarityColumns.has("urgency_keyword_snapshot")) {
+    db.exec(`
+      ALTER TABLE voicemail_urgency_keyword_similarities
+      ADD COLUMN urgency_keyword_snapshot TEXT NOT NULL DEFAULT ''
+    `);
+  }
+  if (!urgencySimilarityColumns.has("urgency_level_snapshot")) {
+    db.exec(`
+      ALTER TABLE voicemail_urgency_keyword_similarities
+      ADD COLUMN urgency_level_snapshot TEXT NOT NULL DEFAULT ''
+    `);
+  }
+
+  db.exec(`
+    UPDATE intents
+    SET is_active = COALESCE(is_active, 1)
+  `);
+  db.exec(`
+    UPDATE urgency_keywords
+    SET is_active = COALESCE(is_active, 1)
+  `);
+  db.exec(`
+    UPDATE voicemail_intent_classifications
+    SET intent_label_snapshot = COALESCE(
+      NULLIF(intent_label_snapshot, ''),
+      (SELECT label FROM intents WHERE id = intent_id),
+      'Unknown'
+    )
+  `);
+  db.exec(`
+    UPDATE voicemail_urgency_keyword_similarities
+    SET
+      urgency_keyword_snapshot = COALESCE(
+        NULLIF(urgency_keyword_snapshot, ''),
+        (SELECT keyword FROM urgency_keywords WHERE id = urgency_keyword_id),
+        'unknown'
+      ),
+      urgency_level_snapshot = COALESCE(
+        NULLIF(urgency_level_snapshot, ''),
+        (SELECT urgency FROM urgency_keywords WHERE id = urgency_keyword_id),
+        'Unknown'
+      )
+  `);
+}
+
+function defaultIntentClassificationScore(voicemailId, intentId) {
+  const checksum = Array.from(voicemailId).reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const variation = ((checksum + intentId * 17) % 4) * 0.01;
+  const baseScore = lowConfidenceScoreByIntentId[intentId] ?? 0.05;
+  return Number(Math.max(0.01, baseScore - variation).toFixed(2));
+}
+
+function defaultUrgencySimilarityScore(voicemailId, urgencyKeywordId, urgency) {
+  const checksum = Array.from(voicemailId).reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const variation = ((checksum + urgencyKeywordId * 13) % 5) * 0.01;
+  const baseScore = lowUrgencySimilarityScoreByUrgency[urgency] ?? 0.05;
+  return Number(Math.max(0.01, baseScore - variation).toFixed(2));
 }
 
 function insertSeedData(db) {
@@ -79,12 +183,13 @@ function insertSeedData(db) {
       default_owner_label = excluded.default_owner_label
   `);
   const insertIntent = db.prepare(`
-    INSERT INTO intents (id, label, clinic_id, is_system)
-    VALUES (@id, @label, @clinicId, @isSystem)
+    INSERT INTO intents (id, label, clinic_id, is_system, is_active)
+    VALUES (@id, @label, @clinicId, @isSystem, @isActive)
     ON CONFLICT(id) DO UPDATE SET
       label = excluded.label,
       clinic_id = excluded.clinic_id,
-      is_system = excluded.is_system
+      is_system = excluded.is_system,
+      is_active = excluded.is_active
   `);
   const insertIntentQueueRoute = db.prepare(`
     INSERT INTO intent_queue_routes (clinic_id, intent_id, queue_id)
@@ -93,13 +198,14 @@ function insertSeedData(db) {
       queue_id = excluded.queue_id
   `);
   const insertUrgencyKeyword = db.prepare(`
-    INSERT INTO urgency_keywords (id, clinic_id, urgency, keyword, is_system)
-    VALUES (@id, @clinicId, @urgency, @keyword, @isSystem)
+    INSERT INTO urgency_keywords (id, clinic_id, urgency, keyword, is_system, is_active)
+    VALUES (@id, @clinicId, @urgency, @keyword, @isSystem, @isActive)
     ON CONFLICT(id) DO UPDATE SET
       clinic_id = excluded.clinic_id,
       urgency = excluded.urgency,
       keyword = excluded.keyword,
-      is_system = excluded.is_system
+      is_system = excluded.is_system,
+      is_active = excluded.is_active
   `);
   const insertPatientUrgencyMarker = db.prepare(`
     INSERT INTO patient_urgency_markers (id, patient_id, gp_id, urgency, note, is_active)
@@ -111,36 +217,60 @@ function insertSeedData(db) {
       note = excluded.note,
       is_active = excluded.is_active
   `);
-  const insertVoicemailMessage = db.prepare(`
-    INSERT OR IGNORE INTO voicemail_messages (
-      id, patient_id, caller_name, caller_phone, clinic_id, received_at, transcript
+  const insertStructuredVoicemail = db.prepare(`
+    INSERT INTO structured_voicemails (
+      voicemail_id,
+      patient_id,
+      caller_name,
+      caller_phone,
+      clinic_id,
+      received_at,
+      transcription,
+      transcription_confidence,
+      transcription_summary,
+      reason_for_call,
+      recommended_steps
     ) VALUES (
-      @id, @patientId, @callerName, @callerPhone, @clinicId, @receivedAt, @transcript
-    )
-  `);
-  const insertProxyAiOutput = db.prepare(`
-    INSERT INTO proxy_ai_voicemail_outputs (
-      voicemail_id, model_name, reason, reason_confidence, summary, summary_confidence,
-      next_step, next_step_confidence, urgency_fallback
-    ) VALUES (
-      @voicemailId, @modelName, @reason, @reasonConfidence, @summary, @summaryConfidence,
-      @nextStep, @nextStepConfidence, @urgencyFallback
+      @voicemailId,
+      @patientId,
+      @callerName,
+      @callerPhone,
+      @clinicId,
+      @receivedAt,
+      @transcription,
+      @transcriptionConfidence,
+      @transcriptionSummary,
+      @reasonForCall,
+      @recommendedSteps
     )
     ON CONFLICT(voicemail_id) DO UPDATE SET
-      model_name = excluded.model_name,
-      reason = excluded.reason,
-      reason_confidence = excluded.reason_confidence,
-      summary = excluded.summary,
-      summary_confidence = excluded.summary_confidence,
-      next_step = excluded.next_step,
-      next_step_confidence = excluded.next_step_confidence,
-      urgency_fallback = excluded.urgency_fallback
+      patient_id = excluded.patient_id,
+      caller_name = excluded.caller_name,
+      caller_phone = excluded.caller_phone,
+      clinic_id = excluded.clinic_id,
+      received_at = excluded.received_at,
+      transcription = excluded.transcription,
+      transcription_confidence = excluded.transcription_confidence,
+      transcription_summary = excluded.transcription_summary,
+      reason_for_call = excluded.reason_for_call,
+      recommended_steps = excluded.recommended_steps
   `);
   const insertVoicemailIntentClassification = db.prepare(`
-    INSERT INTO voicemail_intent_classifications (voicemail_id, intent_id, classification_score)
-    VALUES (@voicemailId, @intentId, @classificationScore)
+    INSERT INTO voicemail_intent_classifications (voicemail_id, intent_id, classification_score, intent_label_snapshot)
+    VALUES (@voicemailId, @intentId, @classificationScore, @intentLabelSnapshot)
     ON CONFLICT(voicemail_id, intent_id) DO UPDATE SET
-      classification_score = excluded.classification_score
+      classification_score = excluded.classification_score,
+      intent_label_snapshot = excluded.intent_label_snapshot
+  `);
+  const insertVoicemailUrgencyKeywordSimilarity = db.prepare(`
+    INSERT INTO voicemail_urgency_keyword_similarities (
+      voicemail_id, urgency_keyword_id, similarity_score, urgency_keyword_snapshot, urgency_level_snapshot
+    )
+    VALUES (@voicemailId, @urgencyKeywordId, @similarityScore, @urgencyKeywordSnapshot, @urgencyLevelSnapshot)
+    ON CONFLICT(voicemail_id, urgency_keyword_id) DO UPDATE SET
+      similarity_score = excluded.similarity_score,
+      urgency_keyword_snapshot = excluded.urgency_keyword_snapshot,
+      urgency_level_snapshot = excluded.urgency_level_snapshot
   `);
   const insertVoicemailAdminState = db.prepare(`
     INSERT INTO voicemail_admin_states (
@@ -168,9 +298,9 @@ function insertSeedData(db) {
     intentQueueRoutes.forEach((row) => insertIntentQueueRoute.run(row));
     urgencyKeywords.forEach((row) => insertUrgencyKeyword.run(row));
     patientUrgencyMarkers.forEach((row) => insertPatientUrgencyMarker.run(row));
-    voicemailMessages.forEach((row) => insertVoicemailMessage.run(row));
-    proxyAiVoicemailOutputs.forEach((row) => insertProxyAiOutput.run(row));
+    structuredVoicemails.forEach((row) => insertStructuredVoicemail.run(row));
     voicemailIntentClassifications.forEach((row) => insertVoicemailIntentClassification.run(row));
+    voicemailUrgencyKeywordSimilarities.forEach((row) => insertVoicemailUrgencyKeywordSimilarity.run(row));
     voicemailAdminStates.forEach((row) => insertVoicemailAdminState.run(row));
   });
 
@@ -202,27 +332,254 @@ function formatAgeLabel(isoString) {
   return `${hours}h ${minutes}m ago`;
 }
 
-function classifyUrgency(row, rulesByClinic) {
-  const relevantRules = [...(rulesByClinic.get("system") ?? []), ...(rulesByClinic.get(String(row.clinic_id)) ?? [])];
-  const searchableText = `${row.reason} ${row.summary} ${row.transcript}`.toLowerCase();
-  const matches = relevantRules.filter((rule) => searchableText.includes(rule.keyword.toLowerCase()));
+function buildUrgencyKeywordSimilarityCandidates(row, similaritiesByVoicemail) {
+  const allMatches = [...(similaritiesByVoicemail.get(row.id) ?? [])]
+    .sort((a, b) => b.score - a.score || urgencyRank[a.urgency] - urgencyRank[b.urgency] || a.keyword.localeCompare(b.keyword));
+  const qualifyingMatches = allMatches.filter((match) => match.score >= URGENCY_KEYWORD_SIMILARITY_THRESHOLD);
 
-  if (matches.length === 0) {
+  return {
+    allMatches,
+    qualifyingMatches,
+    highestSimilarityMatch: qualifyingMatches[0] ?? null,
+  };
+}
+
+function classifyUrgency(row, similaritiesByVoicemail) {
+  const urgencyCandidates = buildUrgencyKeywordSimilarityCandidates(row, similaritiesByVoicemail);
+  const aboveThresholdMatches = urgencyCandidates.qualifyingMatches;
+
+  if (aboveThresholdMatches.length === 0) {
     return {
-      urgency: row.urgency,
-      urgencySource: "seeded fallback",
+      urgency: "Unknown",
+      urgencySource: "no urgency signals",
       matchedUrgencyKeywords: [],
     };
   }
 
-  const highestMatch = matches.reduce((best, current) =>
-    urgencyRank[current.urgency] < urgencyRank[best.urgency] ? current : best,
-  );
+  const highestMatch = aboveThresholdMatches[0];
 
   return {
     urgency: highestMatch.urgency,
-    urgencySource: "clinic keyword rules",
-    matchedUrgencyKeywords: [...new Set(matches.map((match) => match.keyword))],
+    urgencySource: "urgency keyword similarity",
+    matchedUrgencyKeywords: aboveThresholdMatches.map((match) => ({
+      keyword: match.keyword,
+      urgency: match.urgency,
+      score: match.score,
+    })),
+  };
+}
+
+function getTargetClinicIds(db, clinicId = null) {
+  if (clinicId != null) {
+    return [clinicId];
+  }
+
+  return db
+    .prepare("SELECT DISTINCT clinic_id AS clinicId FROM structured_voicemails ORDER BY clinic_id ASC")
+    .all()
+    .map((row) => row.clinicId);
+}
+
+function syncIntentClassificationLookups(db, clinicId = null) {
+  const upsertClassification = db.prepare(`
+    INSERT INTO voicemail_intent_classifications (
+      voicemail_id, intent_id, classification_score, intent_label_snapshot
+    ) VALUES (
+      @voicemailId, @intentId, @classificationScore, @intentLabelSnapshot
+    )
+    ON CONFLICT(voicemail_id, intent_id) DO UPDATE SET
+      classification_score = excluded.classification_score,
+      intent_label_snapshot = excluded.intent_label_snapshot
+  `);
+
+  const sync = db.transaction((targetClinicIds) => {
+    targetClinicIds.forEach((targetClinicId) => {
+      const activeIntents = db
+        .prepare(
+          `
+            SELECT id, label
+            FROM intents
+            WHERE is_active = 1
+              AND (clinic_id IS NULL OR clinic_id = ?)
+            ORDER BY is_system DESC, label ASC
+          `,
+        )
+        .all(targetClinicId);
+
+      const voicemailIds = db
+        .prepare("SELECT voicemail_id AS voicemailId FROM structured_voicemails WHERE clinic_id = ? ORDER BY voicemail_id ASC")
+        .all(targetClinicId);
+
+      if (!activeIntents.length || !voicemailIds.length) {
+        return;
+      }
+
+      const existingScores = db
+        .prepare(
+          `
+            SELECT
+              vic.voicemail_id AS voicemailId,
+              vic.intent_id AS intentId,
+              vic.classification_score AS score
+            FROM voicemail_intent_classifications vic
+            JOIN structured_voicemails sv ON sv.voicemail_id = vic.voicemail_id
+            WHERE sv.clinic_id = ?
+          `,
+        )
+        .all(targetClinicId)
+        .reduce((map, row) => {
+          map.set(`${row.voicemailId}:${row.intentId}`, row.score);
+          return map;
+        }, new Map());
+
+      voicemailIds.forEach(({ voicemailId }) => {
+        activeIntents.forEach((intent) => {
+          upsertClassification.run({
+            voicemailId,
+            intentId: intent.id,
+            classificationScore:
+              existingScores.get(`${voicemailId}:${intent.id}`) ?? defaultIntentClassificationScore(voicemailId, intent.id),
+            intentLabelSnapshot: intent.label,
+          });
+        });
+      });
+    });
+  });
+
+  sync(getTargetClinicIds(db, clinicId));
+}
+
+function syncUrgencyKeywordSimilarityLookups(db, clinicId = null) {
+  const upsertSimilarity = db.prepare(`
+    INSERT INTO voicemail_urgency_keyword_similarities (
+      voicemail_id, urgency_keyword_id, similarity_score, urgency_keyword_snapshot, urgency_level_snapshot
+    ) VALUES (
+      @voicemailId, @urgencyKeywordId, @similarityScore, @urgencyKeywordSnapshot, @urgencyLevelSnapshot
+    )
+    ON CONFLICT(voicemail_id, urgency_keyword_id) DO UPDATE SET
+      similarity_score = excluded.similarity_score,
+      urgency_keyword_snapshot = excluded.urgency_keyword_snapshot,
+      urgency_level_snapshot = excluded.urgency_level_snapshot
+  `);
+
+  const sync = db.transaction((targetClinicIds) => {
+    targetClinicIds.forEach((targetClinicId) => {
+      const activeUrgencyKeywords = db
+        .prepare(
+          `
+            SELECT id, keyword, urgency
+            FROM urgency_keywords
+            WHERE is_active = 1
+              AND (clinic_id IS NULL OR clinic_id = ?)
+            ORDER BY is_system DESC, keyword ASC
+          `,
+        )
+        .all(targetClinicId);
+
+      const voicemailIds = db
+        .prepare("SELECT voicemail_id AS voicemailId FROM structured_voicemails WHERE clinic_id = ? ORDER BY voicemail_id ASC")
+        .all(targetClinicId);
+
+      if (!activeUrgencyKeywords.length || !voicemailIds.length) {
+        return;
+      }
+
+      const existingScores = db
+        .prepare(
+          `
+            SELECT
+              vuks.voicemail_id AS voicemailId,
+              vuks.urgency_keyword_id AS urgencyKeywordId,
+              vuks.similarity_score AS score
+            FROM voicemail_urgency_keyword_similarities vuks
+            JOIN structured_voicemails sv ON sv.voicemail_id = vuks.voicemail_id
+            WHERE sv.clinic_id = ?
+          `,
+        )
+        .all(targetClinicId)
+        .reduce((map, row) => {
+          map.set(`${row.voicemailId}:${row.urgencyKeywordId}`, row.score);
+          return map;
+        }, new Map());
+
+      voicemailIds.forEach(({ voicemailId }) => {
+        activeUrgencyKeywords.forEach((urgencyKeyword) => {
+          upsertSimilarity.run({
+            voicemailId,
+            urgencyKeywordId: urgencyKeyword.id,
+            similarityScore:
+              existingScores.get(`${voicemailId}:${urgencyKeyword.id}`) ??
+              defaultUrgencySimilarityScore(voicemailId, urgencyKeyword.id, urgencyKeyword.urgency),
+            urgencyKeywordSnapshot: urgencyKeyword.keyword,
+            urgencyLevelSnapshot: urgencyKeyword.urgency,
+          });
+        });
+      });
+    });
+  });
+
+  sync(getTargetClinicIds(db, clinicId));
+}
+
+function normalizeBooleanInput(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value === 1 || value === "1" || value === "true") {
+    return true;
+  }
+
+  if (value === 0 || value === "0" || value === "false") {
+    return false;
+  }
+
+  return null;
+}
+
+function getStructuredVoicemailRecord(db, voicemailId) {
+  return db
+    .prepare(
+      `
+        SELECT
+          sv.voicemail_id AS voicemailId,
+          sv.clinic_id AS clinicId,
+          sv.patient_id AS patientId,
+          COALESCE(p.full_name, sv.caller_name, 'Unknown caller') AS patientName,
+          c.name AS clinicName,
+          sv.caller_name AS callerName,
+          sv.caller_phone AS callerPhone,
+          sv.received_at AS receivedAt,
+          ? AS model,
+          sv.transcription AS transcription,
+          sv.transcription_confidence AS transcriptionConfidence,
+          sv.transcription_summary AS transcriptionSummary,
+          sv.reason_for_call AS reasonForCall,
+          sv.recommended_steps AS recommendedSteps
+        FROM structured_voicemails sv
+        JOIN clinics c ON c.id = sv.clinic_id
+        LEFT JOIN patients p ON p.id = sv.patient_id
+        WHERE sv.voicemail_id = ?
+      `,
+    )
+    .get(PROTOTYPE_VOICEMAIL_MODEL, voicemailId);
+}
+
+function getVoicemailUrgencyContext(db, voicemailId) {
+  const record = getStructuredVoicemailRecord(db, voicemailId);
+
+  if (!record) {
+    return null;
+  }
+
+  return {
+    voicemailId: record.voicemailId,
+    clinicId: record.clinicId,
+    patientId: record.patientId,
+    callerPhone: record.callerPhone,
+    receivedAt: record.receivedAt,
+    model: record.model,
+    transcriptionConfidence: record.transcriptionConfidence,
   };
 }
 
@@ -232,16 +589,22 @@ function buildIntentCandidates(row, classificationsByVoicemail) {
   );
   const fallbackCandidate = {
     intentId: null,
-    label: "General callback",
-    score: confidenceLabelToScore(row.reason_confidence ?? row.summary_confidence),
+    label: "Unknown",
+    score: 0,
   };
-  const primaryCandidate = allCandidates[0] ?? fallbackCandidate;
-  const qualifyingCandidates = (allCandidates.length ? allCandidates : [fallbackCandidate]).filter(
-    (candidate) => candidate.score >= INTENT_CLASSIFICATION_THRESHOLD,
-  );
+  const sortedCandidates = allCandidates.length ? allCandidates : [fallbackCandidate];
+  const qualifyingCandidates = sortedCandidates.filter((candidate) => candidate.score >= INTENT_CLASSIFICATION_THRESHOLD);
+  const highestCandidate = sortedCandidates[0] ?? fallbackCandidate;
+  const primaryCandidate =
+    qualifyingCandidates[0] ??
+    {
+      intentId: null,
+      label: "Unknown",
+      score: highestCandidate.score ?? 0,
+    };
 
   return {
-    allCandidates: (allCandidates.length ? allCandidates : [fallbackCandidate]).map((candidate) => ({
+    allCandidates: sortedCandidates.map((candidate) => ({
       ...candidate,
       confidence: scoreToConfidenceLabel(candidate.score),
     })),
@@ -267,7 +630,7 @@ function buildPreviousVoicemailInputs(row, rowsByPhone) {
         callerPhone: candidate.phone,
         location: candidate.location,
       },
-      urgency: candidate.urgency,
+      urgency: candidate.resolvedUrgency ?? candidate.urgency ?? "Unknown",
     }));
 }
 
@@ -283,11 +646,9 @@ function buildVoicemailModelInput(row, rowsByPhone, intentCandidates, keywordUrg
     previousVoicemails: buildPreviousVoicemailInputs(row, rowsByPhone),
     proxy: {
       reason: row.reason,
-      reasonConfidence: row.reason_confidence,
       summary: row.summary,
-      summaryConfidence: row.summary_confidence,
       nextStep: row.next_step,
-      nextStepConfidence: row.next_step_confidence,
+      transcriptionConfidence: row.transcription_confidence,
     },
     intentCandidates: intentCandidates.allCandidates,
     fallbackIntent: {
@@ -331,8 +692,7 @@ function mapVoicemailRow(row) {
     owner: row.owner_label,
     status: row.status,
     intentConfidence: modelOutput.intentConfidence,
-    summaryConfidence: modelOutput.summaryConfidence,
-    reasonConfidence: modelOutput.reasonConfidence,
+    transcriptionConfidence: modelOutput.transcriptionConfidence,
     reason: modelOutput.reason,
     summary: modelOutput.summary,
     nextStep: modelOutput.nextStep,
@@ -364,8 +724,7 @@ function buildHistoryEntry(row) {
     patientUrgencyMarker: modelOutput.patientUrgencyMarker,
     status: row.status,
     intentConfidence: modelOutput.intentConfidence,
-    summaryConfidence: modelOutput.summaryConfidence,
-    reasonConfidence: modelOutput.reasonConfidence,
+    transcriptionConfidence: modelOutput.transcriptionConfidence,
     reason: modelOutput.reason,
     summary: modelOutput.summary,
     resolutionNote: row.status_note ?? "",
@@ -459,11 +818,11 @@ function getPrimaryGpForCaller(db, callerPhone) {
       .prepare(
         `
           SELECT g.id, g.name
-          FROM voicemail_messages vm
-          JOIN patient_gp_relationships pgr ON pgr.patient_id = vm.patient_id AND pgr.is_primary = 1
+          FROM structured_voicemails sv
+          JOIN patient_gp_relationships pgr ON pgr.patient_id = sv.patient_id AND pgr.is_primary = 1
           JOIN gps g ON g.id = pgr.gp_id
-          WHERE vm.caller_phone = ?
-          ORDER BY datetime(vm.received_at) DESC
+          WHERE sv.caller_phone = ?
+          ORDER BY datetime(sv.received_at) DESC
           LIMIT 1
         `,
       )
@@ -477,18 +836,18 @@ function getLatestCallerContext(db, callerPhone) {
       .prepare(
         `
           SELECT
-            vm.caller_phone,
-            vm.clinic_id,
+            sv.caller_phone,
+            sv.clinic_id,
             vas.queue_id,
             vas.assigned_gp_id,
             vas.owner_label,
             vas.status,
             vas.status_note,
             vas.status_note_type
-          FROM voicemail_messages vm
-          LEFT JOIN voicemail_admin_states vas ON vas.caller_phone = vm.caller_phone
-          WHERE vm.caller_phone = ?
-          ORDER BY datetime(vm.received_at) DESC
+          FROM structured_voicemails sv
+          LEFT JOIN voicemail_admin_states vas ON vas.caller_phone = sv.caller_phone
+          WHERE sv.caller_phone = ?
+          ORDER BY datetime(sv.received_at) DESC
           LIMIT 1
         `,
       )
@@ -519,25 +878,40 @@ export function initDatabase() {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(schemaSql);
+  ensureTaxonomyCompatibility(db);
   insertSeedData(db);
+  syncIntentClassificationLookups(db);
+  syncUrgencyKeywordSimilarityLookups(db);
 
   return db;
 }
 
 export function getVoicemails(db) {
-  const urgencyRules = db
+  const urgencyKeywordSimilarities = db
     .prepare(
       `
-        SELECT clinic_id AS clinicId, urgency, keyword
-        FROM urgency_keywords
-        ORDER BY is_system DESC, keyword ASC
+        SELECT
+          vuks.voicemail_id AS voicemailId,
+          vuks.urgency_keyword_id AS urgencyKeywordId,
+          vuks.urgency_keyword_snapshot AS keyword,
+          vuks.urgency_level_snapshot AS urgency,
+          vuks.similarity_score AS score
+        FROM voicemail_urgency_keyword_similarities vuks
+        JOIN urgency_keywords uk ON uk.id = vuks.urgency_keyword_id
+        WHERE uk.is_active = 1
+        ORDER BY vuks.voicemail_id, vuks.similarity_score DESC, vuks.urgency_keyword_snapshot ASC
       `,
     )
     .all();
-  const rulesByClinic = urgencyRules.reduce((map, rule) => {
-    const key = rule.clinicId == null ? "system" : String(rule.clinicId);
+  const similaritiesByVoicemail = urgencyKeywordSimilarities.reduce((map, row) => {
+    const key = row.voicemailId;
     const current = map.get(key) ?? [];
-    current.push(rule);
+    current.push({
+      urgencyKeywordId: row.urgencyKeywordId,
+      keyword: row.keyword,
+      urgency: row.urgency,
+      score: row.score,
+    });
     map.set(key, current);
     return map;
   }, new Map());
@@ -547,11 +921,12 @@ export function getVoicemails(db) {
         SELECT
           vic.voicemail_id AS voicemailId,
           vic.intent_id AS intentId,
-          i.label,
+          vic.intent_label_snapshot AS label,
           vic.classification_score AS score
         FROM voicemail_intent_classifications vic
         JOIN intents i ON i.id = vic.intent_id
-        ORDER BY vic.voicemail_id, vic.classification_score DESC, i.label ASC
+        WHERE i.is_active = 1
+        ORDER BY vic.voicemail_id, vic.classification_score DESC, vic.intent_label_snapshot ASC
       `,
     )
     .all();
@@ -568,21 +943,18 @@ export function getVoicemails(db) {
 
   const rows = db.prepare(`
     SELECT
-      vm.id,
-      vm.clinic_id,
-      vm.patient_id,
-      COALESCE(p.full_name, vm.caller_name, 'Unknown caller') AS patient_name,
+      sv.voicemail_id AS id,
+      sv.clinic_id,
+      sv.patient_id,
+      COALESCE(p.full_name, sv.caller_name, 'Unknown caller') AS patient_name,
       c.name AS location,
-      vm.caller_phone AS phone,
-      vm.received_at,
-      ai.model_name,
-      ai.reason,
-      ai.reason_confidence,
-      ai.summary,
-      ai.summary_confidence,
-      ai.next_step,
-      ai.next_step_confidence,
-      ai.urgency_fallback AS urgency,
+      sv.caller_phone AS phone,
+      sv.received_at,
+      ? AS model_name,
+      sv.reason_for_call AS reason,
+      sv.transcription_summary AS summary,
+      sv.recommended_steps AS next_step,
+      sv.transcription_confidence,
       COALESCE(vas.status, 'New') AS status,
       vas.status_note,
       vas.status_note_type,
@@ -590,50 +962,277 @@ export function getVoicemails(db) {
       COALESCE(vas.queue_id, q.id) AS queue_id,
       q.name AS queue,
       vas.assigned_gp_id,
-      vm.transcript,
+      sv.transcription AS transcript,
       agp.name AS assigned_gp_name,
       pgp.name AS primary_gp_name,
       pum.urgency AS patient_marker_urgency,
       pum.note AS patient_marker_note,
       mgp.name AS patient_marker_gp_name
-    FROM voicemail_messages vm
-    JOIN clinics c ON c.id = vm.clinic_id
-    LEFT JOIN proxy_ai_voicemail_outputs ai ON ai.voicemail_id = vm.id
-    LEFT JOIN voicemail_admin_states vas ON vas.caller_phone = vm.caller_phone
+    FROM structured_voicemails sv
+    JOIN clinics c ON c.id = sv.clinic_id
+    LEFT JOIN voicemail_admin_states vas ON vas.caller_phone = sv.caller_phone
     LEFT JOIN queues q ON q.id = vas.queue_id
-    LEFT JOIN patients p ON p.id = vm.patient_id
+    LEFT JOIN patients p ON p.id = sv.patient_id
     LEFT JOIN gps agp ON agp.id = vas.assigned_gp_id
     LEFT JOIN patient_gp_relationships pgr ON pgr.patient_id = p.id AND pgr.is_primary = 1
     LEFT JOIN gps pgp ON pgp.id = pgr.gp_id
     LEFT JOIN patient_urgency_markers pum ON pum.patient_id = p.id AND pum.is_active = 1
     LEFT JOIN gps mgp ON mgp.id = pum.gp_id
     ORDER BY
-      CASE ai.urgency_fallback WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END,
       CASE COALESCE(vas.status, 'New') WHEN 'New' THEN 0 WHEN 'In Progress' THEN 1 ELSE 2 END,
-      datetime(vm.received_at) DESC
-  `).all();
+      datetime(sv.received_at) DESC
+  `).all(PROTOTYPE_VOICEMAIL_MODEL);
 
-  const rowsByPhone = rows.reduce((map, row) => {
+  const rowsWithUrgencySignals = rows.map((row) => {
+    const keywordUrgencySuggestion = classifyUrgency(row, similaritiesByVoicemail);
+    const patientUrgencyMarker = row.patient_marker_urgency
+      ? {
+          urgency: row.patient_marker_urgency,
+          gpName: row.patient_marker_gp_name,
+          note: row.patient_marker_note,
+        }
+      : null;
+
+    return {
+      ...row,
+      keywordUrgencySuggestion,
+      resolvedUrgency: patientUrgencyMarker?.urgency ?? keywordUrgencySuggestion.urgency,
+      patientUrgencyMarker,
+    };
+  });
+
+  const rowsByPhone = rowsWithUrgencySignals.reduce((map, row) => {
     const current = map.get(row.phone) ?? [];
     current.push(row);
     map.set(row.phone, current);
     return map;
   }, new Map());
 
-  const classifiedRows = rows.map((row) => {
+  const classifiedRows = rowsWithUrgencySignals.map((row) => {
     const intentsForVoicemail = buildIntentCandidates(row, classificationsByVoicemail);
-    const keywordUrgencySuggestion = classifyUrgency(row, rulesByClinic);
     const aiWorkflow = runPrototypeVoicemailModel(
-      buildVoicemailModelInput(row, rowsByPhone, intentsForVoicemail, keywordUrgencySuggestion),
+      buildVoicemailModelInput(row, rowsByPhone, intentsForVoicemail, row.keywordUrgencySuggestion),
     );
 
     return {
       ...row,
+      urgency: row.resolvedUrgency,
       aiWorkflow,
     };
   });
 
   return groupVoicemailRows(classifiedRows);
+}
+
+export function getVoicemailIntentClassification(db, voicemailId) {
+  const voicemail = getVoicemailUrgencyContext(db, voicemailId);
+
+  if (!voicemail) {
+    return null;
+  }
+
+  const classificationRows = db
+    .prepare(
+      `
+        SELECT
+          vic.intent_id AS intentId,
+          vic.intent_label_snapshot AS label,
+          vic.classification_score AS score
+        FROM voicemail_intent_classifications vic
+        JOIN intents i ON i.id = vic.intent_id
+        WHERE vic.voicemail_id = ? AND i.is_active = 1
+        ORDER BY vic.classification_score DESC, vic.intent_label_snapshot ASC
+      `,
+    )
+    .all(voicemailId);
+
+  const intentCandidates = buildIntentCandidates(
+    {
+      id: voicemailId,
+      transcription_confidence: voicemail.transcriptionConfidence,
+    },
+    new Map([[voicemailId, classificationRows]]),
+  );
+
+  return {
+    voicemailId: voicemail.voicemailId,
+    clinicId: voicemail.clinicId,
+    callerPhone: voicemail.callerPhone,
+    receivedAt: voicemail.receivedAt,
+    model: voicemail.model,
+    transcriptionConfidence: voicemail.transcriptionConfidence,
+    threshold: INTENT_CLASSIFICATION_THRESHOLD,
+    primaryIntent: {
+      ...intentCandidates.primaryIntent,
+      confidence: scoreToConfidenceLabel(intentCandidates.primaryIntent.score),
+    },
+    qualifyingIntents: intentCandidates.qualifyingIntents,
+    classifications: intentCandidates.allCandidates,
+  };
+}
+
+export function getVoicemailUrgencyClassification(db, voicemailId) {
+  const voicemail = getVoicemailUrgencyContext(db, voicemailId);
+
+  if (!voicemail) {
+    return null;
+  }
+
+  const similarityRows = db
+    .prepare(
+      `
+        SELECT
+          vuks.urgency_keyword_id AS urgencyKeywordId,
+          vuks.urgency_keyword_snapshot AS keyword,
+          vuks.urgency_level_snapshot AS urgency,
+          vuks.similarity_score AS score
+        FROM voicemail_urgency_keyword_similarities vuks
+        JOIN urgency_keywords uk ON uk.id = vuks.urgency_keyword_id
+        WHERE vuks.voicemail_id = ? AND uk.is_active = 1
+        ORDER BY vuks.similarity_score DESC, vuks.urgency_keyword_snapshot ASC
+      `,
+    )
+    .all(voicemailId);
+
+  const urgencyCandidates = buildUrgencyKeywordSimilarityCandidates(
+    { id: voicemailId },
+    new Map([
+      [
+        voicemailId,
+        similarityRows.map((row) => ({
+          urgencyKeywordId: row.urgencyKeywordId,
+          keyword: row.keyword,
+          urgency: row.urgency,
+          score: row.score,
+        })),
+      ],
+    ]),
+  );
+
+  const availableGpMarkers = voicemail.patientId
+    ? db
+        .prepare(
+          `
+            SELECT
+              pum.id,
+              pum.patient_id AS patientId,
+              pum.gp_id AS gpId,
+              g.name AS gpName,
+              pum.urgency,
+              pum.note,
+              pum.is_active AS isActive
+            FROM patient_urgency_markers pum
+            JOIN gps g ON g.id = pum.gp_id
+            WHERE pum.patient_id = ? AND pum.is_active = 1
+            ORDER BY
+              CASE pum.urgency
+                WHEN 'Critical' THEN 0
+                WHEN 'High' THEN 1
+                WHEN 'Normal' THEN 2
+                WHEN 'Low' THEN 3
+                ELSE 4
+              END,
+              g.name ASC
+          `,
+        )
+        .all(voicemail.patientId)
+    : [];
+  const patientUrgencyMarker = availableGpMarkers[0] ?? null;
+  const keywordUrgencySuggestion = classifyUrgency(
+    { id: voicemailId },
+    new Map([[voicemailId, urgencyCandidates.allMatches]]),
+  );
+  const resolvedUrgency = patientUrgencyMarker?.urgency ?? keywordUrgencySuggestion.urgency;
+  const urgencySource = patientUrgencyMarker ? "patient urgency marker" : keywordUrgencySuggestion.urgencySource;
+
+  return {
+    voicemailId: voicemail.voicemailId,
+    clinicId: voicemail.clinicId,
+    callerPhone: voicemail.callerPhone,
+    receivedAt: voicemail.receivedAt,
+    model: voicemail.model,
+    transcriptionConfidence: voicemail.transcriptionConfidence,
+    threshold: URGENCY_KEYWORD_SIMILARITY_THRESHOLD,
+    selectedKeyword: urgencyCandidates.highestSimilarityMatch,
+    qualifyingSimilarities: urgencyCandidates.qualifyingMatches,
+    similarities: urgencyCandidates.allMatches,
+    availableGpMarkers,
+    patientUrgencyMarker,
+    urgency: resolvedUrgency,
+    urgencySource,
+  };
+}
+
+export function getStructuredVoicemailTranscription(db, voicemailId) {
+  const structuredVoicemail = getStructuredVoicemailRecord(db, voicemailId);
+
+  if (!structuredVoicemail) {
+    return null;
+  }
+
+  const intentClassification = getVoicemailIntentClassification(db, voicemailId);
+  const urgencyClassification = getVoicemailUrgencyClassification(db, voicemailId);
+
+  return {
+    voicemailId: structuredVoicemail.voicemailId,
+    patientId: structuredVoicemail.patientId,
+    patientName: structuredVoicemail.patientName,
+    clinicId: structuredVoicemail.clinicId,
+    clinicName: structuredVoicemail.clinicName,
+    receivedAt: structuredVoicemail.receivedAt,
+    callerPhone: structuredVoicemail.callerPhone,
+    transcription: structuredVoicemail.transcription,
+    transcriptionConfidence: structuredVoicemail.transcriptionConfidence,
+    transcriptionSummary: structuredVoicemail.transcriptionSummary,
+    reasonForCall: structuredVoicemail.reasonForCall,
+    recommendedSteps: structuredVoicemail.recommendedSteps,
+    model: structuredVoicemail.model,
+    finalIntentLabel: intentClassification?.primaryIntent?.label ?? "Unknown",
+    intentClassification: intentClassification
+      ? {
+          threshold: intentClassification.threshold,
+          primaryIntent: intentClassification.primaryIntent,
+          qualifyingIntents: intentClassification.qualifyingIntents,
+          classifications: intentClassification.classifications,
+        }
+      : null,
+    finalUrgencyLabel: urgencyClassification?.urgency ?? "Unknown",
+    urgencyClassification: urgencyClassification
+      ? {
+          threshold: urgencyClassification.threshold,
+          urgencySource: urgencyClassification.urgencySource,
+          selectedKeyword: urgencyClassification.selectedKeyword,
+          urgencyKeywords: urgencyClassification.similarities,
+          qualifyingUrgencyKeywords: urgencyClassification.qualifyingSimilarities,
+          gpMarkers: urgencyClassification.availableGpMarkers,
+          patientUrgencyMarker: urgencyClassification.patientUrgencyMarker,
+        }
+      : null,
+  };
+}
+
+export function getStructuredVoicemailTranscriptionsByPhone(db, callerPhone) {
+  const normalizedCallerPhone = String(callerPhone || "").trim();
+
+  if (!normalizedCallerPhone) {
+    return [];
+  }
+
+  const voicemailIds = db
+    .prepare(
+      `
+        SELECT voicemail_id AS voicemailId
+        FROM structured_voicemails
+        WHERE caller_phone = ?
+        ORDER BY datetime(received_at) DESC, voicemail_id DESC
+      `,
+    )
+    .all(normalizedCallerPhone)
+    .map((row) => row.voicemailId);
+
+  return voicemailIds
+    .map((voicemailId) => getStructuredVoicemailTranscription(db, voicemailId))
+    .filter(Boolean);
 }
 
 export function updateVoicemail(db, id, patch) {
@@ -709,7 +1308,7 @@ export function updateVoicemail(db, id, patch) {
   return getVoicemails(db).find((item) => item.id === id) ?? null;
 }
 
-export function getIntents(db) {
+function getIntentById(db, id) {
   return db
     .prepare(
       `
@@ -717,8 +1316,27 @@ export function getIntents(db) {
           id,
           label,
           clinic_id AS clinicId,
-          is_system AS isSystem
+          is_system AS isSystem,
+          is_active AS isActive
         FROM intents
+        WHERE id = ?
+      `,
+    )
+    .get(id);
+}
+
+export function getIntents(db, { includeInactive = false } = {}) {
+  return db
+    .prepare(
+      `
+        SELECT
+          id,
+          label,
+          clinic_id AS clinicId,
+          is_system AS isSystem,
+          is_active AS isActive
+        FROM intents
+        ${includeInactive ? "" : "WHERE is_active = 1"}
         ORDER BY is_system DESC, label ASC
       `,
     )
@@ -733,27 +1351,81 @@ export function createIntent(db, label, clinicId = null) {
 
   if (standardIntentLabels.has(normalizedLabel) && clinicId == null) {
     return db
-      .prepare("SELECT id, label, clinic_id AS clinicId, is_system AS isSystem FROM intents WHERE label = ? AND clinic_id IS NULL")
+      .prepare(`
+        SELECT id, label, clinic_id AS clinicId, is_system AS isSystem, is_active AS isActive
+        FROM intents
+        WHERE label = ? AND clinic_id IS NULL
+      `)
       .get(normalizedLabel);
   }
 
-  db.prepare(
-    `
-      INSERT INTO intents (label, clinic_id, is_system)
-      VALUES (?, ?, 0)
-      ON CONFLICT(label, clinic_id) DO NOTHING
-    `,
-  ).run(normalizedLabel, clinicId);
-
-  return db
+  const existing = db
     .prepare(
       `
-        SELECT id, label, clinic_id AS clinicId, is_system AS isSystem
+        SELECT id
         FROM intents
         WHERE label = ? AND clinic_id IS ?
       `,
     )
     .get(normalizedLabel, clinicId);
+
+  if (existing) {
+    db.prepare("UPDATE intents SET is_active = 1 WHERE id = ?").run(existing.id);
+  } else {
+    db.prepare(
+      `
+        INSERT INTO intents (label, clinic_id, is_system, is_active)
+        VALUES (?, ?, 0, 1)
+      `,
+    ).run(normalizedLabel, clinicId);
+  }
+
+  syncIntentClassificationLookups(db, clinicId);
+
+  const item = db
+    .prepare(
+      `
+        SELECT id
+        FROM intents
+        WHERE label = ? AND clinic_id IS ?
+      `,
+    )
+    .get(normalizedLabel, clinicId);
+
+  return item ? getIntentById(db, item.id) : null;
+}
+
+export function updateIntent(db, id, { label, isActive } = {}) {
+  const current = getIntentById(db, id);
+  if (!current) {
+    throw new Error("Intent not found");
+  }
+
+  if (current.isSystem) {
+    throw new Error("System intents cannot be edited");
+  }
+
+  const normalizedLabel = label == null ? current.label : String(label).trim();
+  if (!normalizedLabel) {
+    throw new Error("Intent label is required");
+  }
+
+  const normalizedIsActive = isActive == null ? current.isActive : normalizeBooleanInput(isActive);
+  if (normalizedIsActive == null) {
+    throw new Error("isActive must be a boolean");
+  }
+
+  db.prepare(
+    `
+      UPDATE intents
+      SET label = ?, is_active = ?
+      WHERE id = ?
+    `,
+  ).run(normalizedLabel, Number(normalizedIsActive), id);
+
+  syncIntentClassificationLookups(db, current.clinicId);
+
+  return getIntentById(db, id);
 }
 
 export function getQueues(db) {
@@ -876,7 +1548,7 @@ export function upsertIntentQueueRoute(db, { clinicId, intentId, queueId }) {
     .get(clinicId, intentId);
 }
 
-export function getUrgencyKeywords(db) {
+function getUrgencyKeywordById(db, id) {
   return db
     .prepare(
       `
@@ -885,8 +1557,28 @@ export function getUrgencyKeywords(db) {
           clinic_id AS clinicId,
           urgency,
           keyword,
-          is_system AS isSystem
+          is_system AS isSystem,
+          is_active AS isActive
         FROM urgency_keywords
+        WHERE id = ?
+      `,
+    )
+    .get(id);
+}
+
+export function getUrgencyKeywords(db, { includeInactive = false } = {}) {
+  return db
+    .prepare(
+      `
+        SELECT
+          id,
+          clinic_id AS clinicId,
+          urgency,
+          keyword,
+          is_system AS isSystem,
+          is_active AS isActive
+        FROM urgency_keywords
+        ${includeInactive ? "" : "WHERE is_active = 1"}
         ORDER BY urgency, keyword
       `,
     )
@@ -905,28 +1597,79 @@ export function createUrgencyKeyword(db, { clinicId = null, urgency, keyword }) 
     throw new Error("Keyword is required");
   }
 
-  db.prepare(
-    `
-      INSERT INTO urgency_keywords (clinic_id, urgency, keyword, is_system)
-      VALUES (?, ?, ?, 0)
-      ON CONFLICT(clinic_id, urgency, keyword) DO NOTHING
-    `,
-  ).run(clinicId, normalizedUrgency, normalizedKeyword);
-
-  return db
+  const existing = db
     .prepare(
       `
-        SELECT
-          id,
-          clinic_id AS clinicId,
-          urgency,
-          keyword,
-          is_system AS isSystem
+        SELECT id
         FROM urgency_keywords
         WHERE clinic_id IS ? AND urgency = ? AND keyword = ?
       `,
     )
     .get(clinicId, normalizedUrgency, normalizedKeyword);
+
+  if (existing) {
+    db.prepare("UPDATE urgency_keywords SET is_active = 1 WHERE id = ?").run(existing.id);
+  } else {
+    db.prepare(
+      `
+        INSERT INTO urgency_keywords (clinic_id, urgency, keyword, is_system, is_active)
+        VALUES (?, ?, ?, 0, 1)
+      `,
+    ).run(clinicId, normalizedUrgency, normalizedKeyword);
+  }
+
+  syncUrgencyKeywordSimilarityLookups(db, clinicId);
+
+  const item = db
+    .prepare(
+      `
+        SELECT id
+        FROM urgency_keywords
+        WHERE clinic_id IS ? AND urgency = ? AND keyword = ?
+      `,
+    )
+    .get(clinicId, normalizedUrgency, normalizedKeyword);
+
+  return item ? getUrgencyKeywordById(db, item.id) : null;
+}
+
+export function updateUrgencyKeyword(db, id, { urgency, keyword, isActive } = {}) {
+  const current = getUrgencyKeywordById(db, id);
+  if (!current) {
+    throw new Error("Urgency keyword not found");
+  }
+
+  if (current.isSystem) {
+    throw new Error("System urgency keywords cannot be edited");
+  }
+
+  const normalizedUrgency = urgency == null ? current.urgency : String(urgency).trim();
+  const normalizedKeyword = keyword == null ? current.keyword : String(keyword).trim().toLowerCase();
+  const normalizedIsActive = isActive == null ? current.isActive : normalizeBooleanInput(isActive);
+
+  if (!normalizedUrgency || !Object.hasOwn(urgencyRank, normalizedUrgency)) {
+    throw new Error("Valid urgency is required");
+  }
+
+  if (!normalizedKeyword) {
+    throw new Error("Keyword is required");
+  }
+
+  if (normalizedIsActive == null) {
+    throw new Error("isActive must be a boolean");
+  }
+
+  db.prepare(
+    `
+      UPDATE urgency_keywords
+      SET urgency = ?, keyword = ?, is_active = ?
+      WHERE id = ?
+    `,
+  ).run(normalizedUrgency, normalizedKeyword, Number(normalizedIsActive), id);
+
+  syncUrgencyKeywordSimilarityLookups(db, current.clinicId);
+
+  return getUrgencyKeywordById(db, id);
 }
 
 export function getPatientUrgencyMarkers(db) {

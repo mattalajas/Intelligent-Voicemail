@@ -38,7 +38,7 @@ function buildSelectedVoicemail(group, voicemailId) {
     reason: selectedEntry.reason,
     summary: selectedEntry.summary,
     transcript: selectedEntry.transcript,
-    summaryConfidence: selectedEntry.summaryConfidence,
+    transcriptionConfidence: selectedEntry.transcriptionConfidence,
   };
 }
 
@@ -158,7 +158,7 @@ export default function HarbourToSunsetVoicemailPrototype() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-slate-500">Heidi Calls - Harbour to Sunset GP</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">Morning Voicemail Triage</h1>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">Morning Voicemail Dashboard</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               Turn overnight voicemails into structured work for admin, nurse, and GP teams. Prioritised items are shown first,
               with suggested next steps and clear ownership.
@@ -180,7 +180,7 @@ export default function HarbourToSunsetVoicemailPrototype() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard title="Inbox" value={counts.total} subtitle="Structured voicemail tasks" icon={MessageSquareText} />
           <StatCard title="Critical" value={counts.critical} subtitle="Needs immediate review" icon={AlertTriangle} />
-          <StatCard title="Front Desk Queue" value={counts.sameDay} subtitle="Can be actioned by front desk" icon={Clock3} />
+          <StatCard title="Admin Queue" value={counts.sameDay} subtitle="Admin specific work" icon={Clock3} />
           <StatCard title="Open work" value={counts.unresolved} subtitle="New or in progress" icon={ClipboardList} />
         </div>
 

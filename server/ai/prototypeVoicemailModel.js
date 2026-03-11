@@ -18,8 +18,7 @@ function runSummaryStage(input) {
     stage: "summary_and_reason",
     summary: input.proxy.summary,
     reason: input.proxy.reason,
-    summaryConfidence: input.proxy.summaryConfidence,
-    reasonConfidence: input.proxy.reasonConfidence ?? input.proxy.summaryConfidence,
+    transcriptionConfidence: input.proxy.transcriptionConfidence,
     source: "proxy mapping",
   };
 }
@@ -45,7 +44,7 @@ function runIntentStage(input) {
     threshold: input.intentThreshold,
     primaryIntent,
     qualifyingIntents,
-    source: "proxy mapping",
+    source: qualifyingIntents.length > 0 ? "proxy mapping" : "below threshold fallback",
   };
 }
 
@@ -67,7 +66,7 @@ function runUrgencyStage(input) {
     urgencySource: input.urgencySignals.keywordSuggestion.urgencySource,
     matchedUrgencyKeywords: input.urgencySignals.keywordSuggestion.matchedUrgencyKeywords ?? [],
     patientUrgencyMarker: null,
-    source: "keyword and fallback logic",
+    source: "keyword similarity or unknown classification",
   };
 }
 
@@ -75,7 +74,6 @@ function runNextStepStage(input) {
   return {
     stage: "next_step_suggestion",
     nextStep: input.proxy.nextStep,
-    confidence: input.proxy.nextStepConfidence ?? input.proxy.summaryConfidence,
     source: "proxy mapping",
   };
 }
@@ -101,9 +99,8 @@ export function runPrototypeVoicemailModel(input) {
     },
     output: {
       reason: summaryStage.reason,
-      reasonConfidence: summaryStage.reasonConfidence,
       summary: summaryStage.summary,
-      summaryConfidence: summaryStage.summaryConfidence,
+      transcriptionConfidence: summaryStage.transcriptionConfidence,
       intent: intentStage.primaryIntent.label,
       intents: intentStage.qualifyingIntents,
       intentConfidence: intentStage.primaryIntent.confidence,

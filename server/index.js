@@ -8,9 +8,15 @@ import {
   getIntents,
   getPatientUrgencyMarkers,
   getQueues,
+  getStructuredVoicemailTranscriptionsByPhone,
   getUrgencyKeywords,
+  getVoicemailIntentClassification,
+  getStructuredVoicemailTranscription,
+  getVoicemailUrgencyClassification,
   getVoicemails,
   initDatabase,
+  updateIntent,
+  updateUrgencyKeyword,
   upsertPatientUrgencyMarker,
   updateVoicemail,
   upsertIntentQueueRoute,
@@ -31,8 +37,58 @@ app.get("/api/voicemails", (_req, res) => {
   res.json({ items: getVoicemails(db) });
 });
 
-app.get("/api/intents", (_req, res) => {
-  res.json({ items: getIntents(db) });
+app.get("/api/voicemails/:voicemailId/intents", (req, res) => {
+  const item = getVoicemailIntentClassification(db, req.params.voicemailId);
+
+  if (!item) {
+    res.status(404).json({ error: "Voicemail not found" });
+    return;
+  }
+
+  res.json({ item });
+});
+
+app.get("/api/voicemails/:voicemailId/urgency", (req, res) => {
+  const item = getVoicemailUrgencyClassification(db, req.params.voicemailId);
+
+  if (!item) {
+    res.status(404).json({ error: "Voicemail not found" });
+    return;
+  }
+
+  res.json({ item });
+});
+
+app.get("/api/voicemails/:voicemailId/structured-transcription", (req, res) => {
+  const item = getStructuredVoicemailTranscription(db, req.params.voicemailId);
+
+  if (!item) {
+    res.status(404).json({ error: "Voicemail not found" });
+    return;
+  }
+
+  res.json({ item });
+});
+
+app.get("/api/phone-numbers/:phoneNumber/structured-transcriptions", (req, res) => {
+  const phoneNumber = String(req.params.phoneNumber || "").trim();
+
+  if (!phoneNumber) {
+    res.status(400).json({ error: "Phone number is required" });
+    return;
+  }
+
+  const items = getStructuredVoicemailTranscriptionsByPhone(db, phoneNumber);
+  res.json({
+    phoneNumber,
+    count: items.length,
+    items,
+  });
+});
+
+app.get("/api/intents", (req, res) => {
+  const includeInactive = req.query.includeInactive === "true" || req.query.includeInactive === "1";
+  res.json({ items: getIntents(db, { includeInactive }) });
 });
 
 app.post("/api/intents", (req, res) => {
@@ -41,6 +97,16 @@ app.post("/api/intents", (req, res) => {
     res.status(201).json({ item });
   } catch (error) {
     res.status(400).json({ error: error.message || "Unable to create intent" });
+  }
+});
+
+app.patch("/api/intents/:id", (req, res) => {
+  try {
+    const item = updateIntent(db, Number(req.params.id), req.body ?? {});
+    res.json({ item });
+  } catch (error) {
+    const statusCode = error.message === "Intent not found" ? 404 : 400;
+    res.status(statusCode).json({ error: error.message || "Unable to update intent" });
   }
 });
 
@@ -70,8 +136,9 @@ app.put("/api/intent-queue-routes", (req, res) => {
   }
 });
 
-app.get("/api/urgency-keywords", (_req, res) => {
-  res.json({ items: getUrgencyKeywords(db) });
+app.get("/api/urgency-keywords", (req, res) => {
+  const includeInactive = req.query.includeInactive === "true" || req.query.includeInactive === "1";
+  res.json({ items: getUrgencyKeywords(db, { includeInactive }) });
 });
 
 app.post("/api/urgency-keywords", (req, res) => {
@@ -80,6 +147,16 @@ app.post("/api/urgency-keywords", (req, res) => {
     res.status(201).json({ item });
   } catch (error) {
     res.status(400).json({ error: error.message || "Unable to create urgency keyword" });
+  }
+});
+
+app.patch("/api/urgency-keywords/:id", (req, res) => {
+  try {
+    const item = updateUrgencyKeyword(db, Number(req.params.id), req.body ?? {});
+    res.json({ item });
+  } catch (error) {
+    const statusCode = error.message === "Urgency keyword not found" ? 404 : 400;
+    res.status(statusCode).json({ error: error.message || "Unable to update urgency keyword" });
   }
 });
 

@@ -104,7 +104,7 @@ export function VoicemailInbox({ filtered, selectedGroupId, selectedVoicemailId,
                           <p className="mt-1 text-sm text-slate-600">{entry.summary}</p>
                           <p className="mt-1 text-xs text-slate-500">
                             Intents: {entry.intents?.length > 1 ? `${entry.intent} +${entry.intents.length - 1} more` : entry.intent} |
-                            Summary confidence: {entry.summaryConfidence}
+                            Transcript confidence: {entry.transcriptionConfidence}
                           </p>
                         </button>
                       );

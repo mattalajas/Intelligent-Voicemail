@@ -7,9 +7,15 @@ import { statusActionStyles, statusStyles, urgencyStyles } from "./constants";
 
 export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
   const relatedHistory = selected?.history?.filter((entry) => entry.voicemailId !== selected.selectedVoicemailId) ?? [];
+  const hasUrgencyKeywordMatches = (selected?.matchedUrgencyKeywords?.length ?? 0) > 0;
+  const hasPatientUrgencyMarker = Boolean(selected?.patientUrgencyMarker);
 
   function formatIntentScore(score) {
     return `${Math.round((score ?? 0) * 100)}%`;
+  }
+
+  function formatUrgencyKeywordMatch(match) {
+    return `${match.keyword} (${match.urgency}, ${formatIntentScore(match.score)})`;
   }
 
   function getStatusNoteMeta(status) {
@@ -127,7 +133,7 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Voicemail Summary</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Summary confidence: {selected.summaryConfidence}
+                  Transcript confidence: {selected.transcriptionConfidence}
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-900">{selected.summary}</p>
                 <p className="mt-2 text-sm text-slate-700">
@@ -159,6 +165,23 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 row-span-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Recommended next step</p>
                 <p className="mt-2 text-sm font-medium text-slate-900">{selected.nextStep}</p>
+                {hasPatientUrgencyMarker && (
+                  <p className="mt-2 text-sm text-slate-700">
+                    GP urgency marker: {selected.patientUrgencyMarker.urgency} by {selected.patientUrgencyMarker.gpName}
+                    {selected.patientUrgencyMarker.note ? ` - ${selected.patientUrgencyMarker.note}` : ""}
+                  </p>
+                )}
+                {hasUrgencyKeywordMatches && (
+                  <p className="mt-2 text-sm text-slate-700">
+                    Urgency keyword similarity {"\u2265"} 60%: {selected.matchedUrgencyKeywords.map(formatUrgencyKeywordMatch).join(", ")}
+                  </p>
+                )}
+                {!hasUrgencyKeywordMatches && !hasPatientUrgencyMarker && (
+                  <p className="mt-2 text-sm text-slate-700">
+                    No urgency keyword similarity {"\u2265"} 60% and no GP urgency marker found. Urgency classified as{" "}
+                    {selected.urgency}.
+                  </p>
+                )}
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Queue recommendation</p>
@@ -170,17 +193,6 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Caller history</p>
               <p className="mt-2 text-sm font-medium text-slate-900">{selected.historicalContext}</p>
-              {selected.matchedUrgencyKeywords?.length > 0 && (
-                <p className="mt-2 text-sm text-slate-700">
-                  Clinic urgency keywords matched: {selected.matchedUrgencyKeywords.join(", ")}
-                </p>
-              )}
-              {selected.patientUrgencyMarker && (
-                <p className="mt-2 text-sm text-slate-700">
-                  GP urgency marker: {selected.patientUrgencyMarker.urgency} by {selected.patientUrgencyMarker.gpName}
-                  {selected.patientUrgencyMarker.note ? ` - ${selected.patientUrgencyMarker.note}` : ""}
-                </p>
-              )}
             </div>
 
             {selected.resolutionNote && ["Resolved", "In Progress"].includes(selected.status) && (
@@ -230,7 +242,7 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                       <p className="mt-2 text-sm font-medium text-slate-900">{entry.reason}</p>
                       <p className="mt-1 text-sm text-slate-600">{entry.summary}</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        Primary intent: {entry.intent} ({formatIntentScore(entry.primaryIntentScore)}) | Summary confidence: {entry.summaryConfidence}
+                        Primary intent: {entry.intent} ({formatIntentScore(entry.primaryIntentScore)}) | Transcript confidence: {entry.transcriptionConfidence}
                       </p>
                     </div>
                   ))}

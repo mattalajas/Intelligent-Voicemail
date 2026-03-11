@@ -1,139 +1,7 @@
-export const proxyAiVoicemailOutputs = [
-  {
-    voicemailId: "VM-1042",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Chest pain and shortness of breath overnight.",
-    reasonConfidence: "High",
-    summary: "Caller reports chest pain with trouble breathing and asked for an urgent callback.",
-    summaryConfidence: "High",
-    nextStep: "Immediate callback + advise emergency care",
-    nextStepConfidence: "High",
-    urgencyFallback: "Critical",
-  },
-  {
-    voicemailId: "VM-1043",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Repeat call reporting worsening chest tightness.",
-    reasonConfidence: "High",
-    summary: "Called back 14 minutes later saying symptoms are worse and asking if someone is there yet.",
-    summaryConfidence: "High",
-    nextStep: "Immediate callback + advise emergency care",
-    nextStepConfidence: "High",
-    urgencyFallback: "Critical",
-  },
-  {
-    voicemailId: "VM-1041",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Rash after starting antibiotics.",
-    reasonConfidence: "Medium",
-    summary: "Started antibiotics yesterday and now has a spreading rash. Wants advice today.",
-    summaryConfidence: "Medium",
-    nextStep: "Nurse callback this morning",
-    nextStepConfidence: "Medium",
-    urgencyFallback: "High",
-  },
-  {
-    voicemailId: "VM-1040",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Repeat call noting rash is spreading to chest.",
-    reasonConfidence: "High",
-    summary: "Follow-up voicemail adds that the rash is spreading and the patient is unsure whether to take the next antibiotic dose.",
-    summaryConfidence: "High",
-    nextStep: "Nurse callback this morning",
-    nextStepConfidence: "High",
-    urgencyFallback: "High",
-  },
-  {
-    voicemailId: "VM-1038",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Child has high fever and parent requests same-day visit.",
-    reasonConfidence: "Medium",
-    summary: "Parent called asking for the earliest appointment today due to a child's fever overnight.",
-    summaryConfidence: "Medium",
-    nextStep: "Offer same-day GP slot",
-    nextStepConfidence: "Medium",
-    urgencyFallback: "High",
-  },
-  {
-    voicemailId: "VM-1036",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Parent requests urgent review for infant with fever overnight.",
-    reasonConfidence: "High",
-    summary: "Caller says her infant developed a fever overnight and asks for the earliest urgent appointment today.",
-    summaryConfidence: "High",
-    nextStep: "Offer same-day GP slot",
-    nextStepConfidence: "High",
-    urgencyFallback: "Normal",
-  },
-  {
-    voicemailId: "VM-1037",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Repeat inhaler prescription requested.",
-    reasonConfidence: "High",
-    summary: "Requests repeat script for asthma inhaler before running out tomorrow.",
-    summaryConfidence: "High",
-    nextStep: "Send to GP prescription queue",
-    nextStepConfidence: "High",
-    urgencyFallback: "Normal",
-  },
-  {
-    voicemailId: "VM-1035",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Wants to discuss blood pressure medication with GP.",
-    reasonConfidence: "Medium",
-    summary: "Asked specifically for Dr Lee to call back regarding side effects from blood pressure medication.",
-    summaryConfidence: "Medium",
-    nextStep: "Add to doctor callback list",
-    nextStepConfidence: "Medium",
-    urgencyFallback: "Normal",
-  },
-  {
-    voicemailId: "VM-1032",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Medical certificate request for work.",
-    reasonConfidence: "High",
-    summary: "Requested a work certificate for illness earlier this week.",
-    summaryConfidence: "High",
-    nextStep: "Prepare certificate request",
-    nextStepConfidence: "High",
-    urgencyFallback: "Low",
-  },
-  {
-    voicemailId: "VM-1030",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Callback requested with unclear purpose.",
-    reasonConfidence: "Low",
-    summary: "Left a short callback request without identifying information or reason for contact.",
-    summaryConfidence: "Low",
-    nextStep: "Review transcript and return call",
-    nextStepConfidence: "Low",
-    urgencyFallback: "Unknown",
-  },
-  {
-    voicemailId: "VM-1028",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Following up on blood test results.",
-    reasonConfidence: "High",
-    summary: "Patient asking whether last week's blood test results are back and if a callback is needed.",
-    summaryConfidence: "High",
-    nextStep: "Nurse review results before callback",
-    nextStepConfidence: "High",
-    urgencyFallback: "Normal",
-  },
-  {
-    voicemailId: "VM-1027",
-    modelName: "prototype-voicemail-proxy",
-    reason: "Second voicemail asking whether fasting results need urgent review.",
-    reasonConfidence: "Medium",
-    summary: "Called again to say she missed a prior callback and wants to know if anything urgent was found in the test results.",
-    summaryConfidence: "Medium",
-    nextStep: "Nurse review results before callback",
-    nextStepConfidence: "Medium",
-    urgencyFallback: "Normal",
-  },
-];
+import { intents, urgencyKeywords } from "../clinicModel/configData.js";
+import { structuredVoicemails } from "../voicemail/structuredData.js";
 
-export const voicemailIntentClassifications = [
+const seededVoicemailIntentClassifications = [
   { voicemailId: "VM-1042", intentId: 1, classificationScore: 0.97 },
   { voicemailId: "VM-1042", intentId: 3, classificationScore: 0.66 },
   { voicemailId: "VM-1042", intentId: 7, classificationScore: 0.48 },
@@ -168,3 +36,102 @@ export const voicemailIntentClassifications = [
   { voicemailId: "VM-1027", intentId: 3, classificationScore: 0.64 },
   { voicemailId: "VM-1027", intentId: 7, classificationScore: 0.37 },
 ];
+
+const lowConfidenceScoreByIntentId = {
+  1: 0.11,
+  2: 0.09,
+  3: 0.1,
+  4: 0.08,
+  5: 0.07,
+  6: 0.08,
+  7: 0.12,
+  8: 0.06,
+  9: 0.05,
+};
+
+function fallbackClassificationScore(voicemailId, intentId) {
+  const checksum = Array.from(voicemailId).reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const variation = ((checksum + intentId * 17) % 4) * 0.01;
+  const baseScore = lowConfidenceScoreByIntentId[intentId] ?? 0.05;
+  return Number(Math.max(0.01, baseScore - variation).toFixed(2));
+}
+
+const seededClassificationLookup = seededVoicemailIntentClassifications.reduce((lookup, row) => {
+  lookup.set(`${row.voicemailId}:${row.intentId}`, row.classificationScore);
+  return lookup;
+}, new Map());
+const intentLabelById = new Map(intents.map((intent) => [intent.id, intent.label]));
+const urgencyKeywordById = new Map(urgencyKeywords.map((urgencyKeyword) => [urgencyKeyword.id, urgencyKeyword]));
+
+export const voicemailIntentClassifications = structuredVoicemails.flatMap(({ voicemailId, clinicId }) => {
+  const applicableIntents = intents.filter((intent) => intent.clinicId == null || intent.clinicId === clinicId);
+
+  return applicableIntents.map((intent) => ({
+    voicemailId,
+    intentId: intent.id,
+    classificationScore:
+      seededClassificationLookup.get(`${voicemailId}:${intent.id}`) ??
+      fallbackClassificationScore(voicemailId, intent.id),
+    intentLabelSnapshot: intentLabelById.get(intent.id) ?? "Unknown",
+  }));
+});
+
+const seededVoicemailUrgencyKeywordSimilarities = [
+  { voicemailId: "VM-1042", urgencyKeywordId: 1, similarityScore: 0.98 },
+  { voicemailId: "VM-1042", urgencyKeywordId: 2, similarityScore: 0.96 },
+  { voicemailId: "VM-1042", urgencyKeywordId: 10, similarityScore: 0.93 },
+  { voicemailId: "VM-1043", urgencyKeywordId: 1, similarityScore: 0.68 },
+  { voicemailId: "VM-1043", urgencyKeywordId: 3, similarityScore: 0.97 },
+  { voicemailId: "VM-1043", urgencyKeywordId: 6, similarityScore: 0.95 },
+  { voicemailId: "VM-1041", urgencyKeywordId: 4, similarityScore: 0.97 },
+  { voicemailId: "VM-1040", urgencyKeywordId: 4, similarityScore: 0.96 },
+  { voicemailId: "VM-1040", urgencyKeywordId: 11, similarityScore: 0.95 },
+  { voicemailId: "VM-1038", urgencyKeywordId: 5, similarityScore: 0.97 },
+  { voicemailId: "VM-1038", urgencyKeywordId: 12, similarityScore: 0.88 },
+  { voicemailId: "VM-1036", urgencyKeywordId: 5, similarityScore: 0.94 },
+  { voicemailId: "VM-1036", urgencyKeywordId: 12, similarityScore: 0.76 },
+  { voicemailId: "VM-1036", urgencyKeywordId: 13, similarityScore: 0.99 },
+  { voicemailId: "VM-1037", urgencyKeywordId: 7, similarityScore: 0.98 },
+  { voicemailId: "VM-1032", urgencyKeywordId: 9, similarityScore: 0.98 },
+  { voicemailId: "VM-1028", urgencyKeywordId: 8, similarityScore: 0.97 },
+  { voicemailId: "VM-1027", urgencyKeywordId: 8, similarityScore: 0.94 },
+];
+
+const lowUrgencySimilarityScoreByUrgency = {
+  Critical: 0.12,
+  High: 0.1,
+  Normal: 0.08,
+  Low: 0.06,
+};
+
+function defaultUrgencySimilarityScore(voicemailId, urgencyKeywordId, urgency) {
+  const checksum = Array.from(voicemailId).reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const variation = ((checksum + urgencyKeywordId * 13) % 5) * 0.01;
+  const baseScore = lowUrgencySimilarityScoreByUrgency[urgency] ?? 0.05;
+  return Number(Math.max(0.01, baseScore - variation).toFixed(2));
+}
+
+const seededUrgencySimilarityLookup = seededVoicemailUrgencyKeywordSimilarities.reduce((lookup, row) => {
+  lookup.set(`${row.voicemailId}:${row.urgencyKeywordId}`, row.similarityScore);
+  return lookup;
+}, new Map());
+
+export const voicemailUrgencyKeywordSimilarities = structuredVoicemails.flatMap(({ voicemailId, clinicId }) => {
+  const applicableUrgencyKeywords = urgencyKeywords.filter(
+    (urgencyKeyword) => urgencyKeyword.clinicId == null || urgencyKeyword.clinicId === clinicId,
+  );
+
+  return applicableUrgencyKeywords.map((urgencyKeyword) => {
+    const keywordSnapshot = urgencyKeywordById.get(urgencyKeyword.id);
+
+    return {
+      voicemailId,
+      urgencyKeywordId: urgencyKeyword.id,
+      similarityScore:
+        seededUrgencySimilarityLookup.get(`${voicemailId}:${urgencyKeyword.id}`) ??
+        defaultUrgencySimilarityScore(voicemailId, urgencyKeyword.id, urgencyKeyword.urgency),
+      urgencyKeywordSnapshot: keywordSnapshot?.keyword ?? urgencyKeyword.keyword,
+      urgencyLevelSnapshot: keywordSnapshot?.urgency ?? urgencyKeyword.urgency,
+    };
+  });
+});
