@@ -10,12 +10,14 @@ const variants = {
   secondary: "border border-transparent bg-slate-100 text-slate-700",
 };
 
-export function Badge({ className, variant = "default", ...props }) {
+export function Badge({ className, variant, ...props }) {
+  const resolvedVariant = variant ?? (className ? null : "default");
+
   return (
     <span
       className={classes(
         "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-        variants[variant],
+        resolvedVariant ? variants[resolvedVariant] : null,
         className,
       )}
       {...props}

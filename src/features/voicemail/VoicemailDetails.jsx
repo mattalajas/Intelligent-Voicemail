@@ -1,9 +1,9 @@
 import React from "react";
-import { CheckCircle2, Pencil, Phone, Play } from "lucide-react";
+import { Pencil, Phone, Play } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { statusStyles, urgencyStyles } from "./constants";
+import { statusActionStyles, statusStyles, urgencyStyles } from "./constants";
 
 export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
   const relatedHistory = selected?.history?.filter((entry) => entry.voicemailId !== selected.selectedVoicemailId) ?? [];
@@ -85,6 +85,15 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
     }
 
     updateItem(selected.id, { resolutionNote: trimmedNote });
+  }
+
+  function getStatusActionClassName(status) {
+    const tone = statusActionStyles[status];
+    if (!tone) {
+      return "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
+    }
+
+    return selected?.status === status ? tone.active : tone.inactive;
   }
 
   return (
@@ -235,15 +244,27 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                 {isSaving && <span className="text-xs text-slate-500">Saving to SQLite...</span>}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button onClick={() => handleStatusChange("New")} variant="outline" disabled={isSaving}>
+                <Button
+                  onClick={() => handleStatusChange("New")}
+                  className={getStatusActionClassName("New")}
+                  disabled={isSaving}
+                >
                   New
                 </Button>
-                <Button onClick={() => handleStatusChange("In Progress")} variant="outline" disabled={isSaving}>
+                <Button
+                  onClick={() => handleStatusChange("In Progress")}
+                  className={getStatusActionClassName("In Progress")}
+                  disabled={isSaving}
+                >
                   In progress
                 </Button>
-                <Button onClick={() => handleStatusChange("Resolved")} disabled={isSaving}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" /> Resolved
-                </Button>
+                <Button
+                  onClick={() => handleStatusChange("Resolved")}
+                  className={getStatusActionClassName("Resolved")}
+                  disabled={isSaving}
+                >
+                  Resolved
+                </Button> 
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Queue actions</p>

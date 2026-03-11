@@ -9,10 +9,10 @@ import {
 } from "lucide-react";
 
 export const urgencyStyles = {
-  Critical: "bg-red-100 text-red-700 border-red-200",
-  High: "bg-rose-100 text-rose-700 border-rose-200",
-  Normal: "bg-pink-100 text-pink-700 border-pink-200",
-  Low: "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200",
+  Critical: "bg-red-300 text-red-700 border-red-200",
+  High: "bg-rose-50 text-rose-700 border-rose-200",
+  Normal: "bg-orange-50 text-pink-700 border-pink-200",
+  Low: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
   Unknown: "bg-zinc-100 text-zinc-700 border-zinc-200",
 };
 
@@ -20,6 +20,21 @@ export const statusStyles = {
   New: "bg-blue-600 text-white",
   "In Progress": "bg-yellow-500 text-slate-950",
   Resolved: "bg-emerald-600 text-white",
+};
+
+export const statusActionStyles = {
+  New: {
+    active: "border border-blue-600 bg-blue-600 text-white hover:bg-blue-500",
+    inactive: "border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100",
+  },
+  "In Progress": {
+    active: "border border-yellow-400 bg-yellow-500 text-slate-950 hover:bg-yellow-400",
+    inactive: "border border-yellow-200 bg-yellow-50 text-yellow-800 hover:bg-yellow-100",
+  },
+  Resolved: {
+    active: "border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500",
+    inactive: "border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+  },
 };
 
 export const queueIcons = {

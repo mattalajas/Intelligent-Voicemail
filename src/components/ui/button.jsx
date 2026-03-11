@@ -15,13 +15,15 @@ const sizes = {
   sm: "h-9 px-3",
 };
 
-export function Button({ className, variant = "default", size = "default", type = "button", ...props }) {
+export function Button({ className, variant, size = "default", type = "button", ...props }) {
+  const resolvedVariant = variant ?? (className ? null : "default");
+
   return (
     <button
       type={type}
       className={classes(
         "inline-flex items-center justify-center rounded-xl text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:pointer-events-none disabled:opacity-50",
-        variants[variant],
+        resolvedVariant ? variants[resolvedVariant] : null,
         sizes[size],
         className,
       )}
