@@ -145,8 +145,12 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
             <div className="flex flex-wrap items-center gap-2">
               <Badge className={urgencyStyles[selected.urgency]}>{selected.urgency}</Badge>
               <Badge className={statusStyles[selected.status]}>{selected.status}</Badge>
+              {selected.isUrgencyManuallyOverridden && (
+                <p className="text-xs font-medium italic text-slate-500">
+                  Urgency manually changed by staff. Machine-selected urgency: {selected.machineUrgency}.
+                </p>
+              )}
             </div>
-
             <div>
               <h2 className="text-2xl font-semibold text-slate-900">{selected.patient}</h2>
               <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
@@ -345,6 +349,36 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Urgency override</p>
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                  <select
+                    value={selected.isUrgencyManuallyOverridden ? selected.urgency : ""}
+                    onChange={(event) => {
+                      const nextUrgency = event.target.value;
+                      if (nextUrgency) {
+                        updateItem(selected.id, { urgencyOverride: nextUrgency });
+                      }
+                    }}
+                    disabled={isSaving}
+                    className="h-10 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">Use machine-selected urgency</option>
+                    {["Critical", "High", "Normal", "Low", "Unknown"].map((urgency) => (
+                      <option key={urgency} value={urgency}>
+                        {urgency}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="outline"
+                    onClick={() => updateItem(selected.id, { revertUrgency: true })}
+                    disabled={isSaving || !selected.isUrgencyManuallyOverridden}
+                  >
+                    Revert to machine
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

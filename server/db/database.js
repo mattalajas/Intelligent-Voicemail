@@ -162,6 +162,17 @@ function ensureTaxonomyCompatibility(db) {
   `);
 }
 
+function ensureAdminStateCompatibility(db) {
+  const adminStateColumns = getColumnNames(db, "voicemail_admin_states");
+  if (!adminStateColumns.has("urgency_override")) {
+    db.exec(`
+      ALTER TABLE voicemail_admin_states
+      ADD COLUMN urgency_override TEXT
+      CHECK (urgency_override IN ('Critical', 'High', 'Normal', 'Low', 'Unknown') OR urgency_override IS NULL)
+    `);
+  }
+}
+
 function defaultIntentClassificationScore(voicemailId, intentId) {
   const checksum = Array.from(voicemailId).reduce((sum, character) => sum + character.charCodeAt(0), 0);
   const variation = ((checksum + intentId * 17) % 4) * 0.01;
@@ -310,15 +321,16 @@ function insertSeedData(db) {
   `);
   const insertVoicemailAdminState = db.prepare(`
     INSERT INTO voicemail_admin_states (
-      caller_phone, queue_id, assigned_gp_id, owner_label, status, status_note, status_note_type, updated_at
+      caller_phone, queue_id, assigned_gp_id, owner_label, status, urgency_override, status_note, status_note_type, updated_at
     ) VALUES (
-      @callerPhone, @queueId, @assignedGpId, @ownerLabel, @status, @statusNote, @statusNoteType, @updatedAt
+      @callerPhone, @queueId, @assignedGpId, @ownerLabel, @status, @urgencyOverride, @statusNote, @statusNoteType, @updatedAt
     )
     ON CONFLICT(caller_phone) DO UPDATE SET
       queue_id = excluded.queue_id,
       assigned_gp_id = excluded.assigned_gp_id,
       owner_label = excluded.owner_label,
       status = excluded.status,
+      urgency_override = excluded.urgency_override,
       status_note = excluded.status_note,
       status_note_type = excluded.status_note_type,
       updated_at = excluded.updated_at
@@ -338,7 +350,7 @@ function insertSeedData(db) {
     structuredVoicemails.forEach((row) => insertStructuredVoicemail.run(row));
     voicemailIntentClassifications.forEach((row) => insertVoicemailIntentClassification.run(row));
     voicemailUrgencyKeywordSimilarities.forEach((row) => insertVoicemailUrgencyKeywordSimilarity.run(row));
-    voicemailAdminStates.forEach((row) => insertVoicemailAdminState.run(row));
+    voicemailAdminStates.forEach((row) => insertVoicemailAdminState.run({ urgencyOverride: null, ...row }));
   });
 
   seed();
@@ -729,6 +741,9 @@ function mapVoicemailRow(row) {
     primaryIntentScore: modelOutput.primaryIntentScore,
     urgency: modelOutput.urgency,
     urgencySource: modelOutput.urgencySource,
+    machineUrgency: row.machineSelectedUrgency,
+    machineUrgencySource: row.machineSelectedUrgencySource,
+    isUrgencyManuallyOverridden: row.isUrgencyManuallyOverridden,
     matchedUrgencyKeywords: modelOutput.matchedUrgencyKeywords,
     patientUrgencyMarker: modelOutput.patientUrgencyMarker,
     queue: row.queue,
@@ -767,8 +782,12 @@ function buildHistoryEntry(row) {
     intents: modelOutput.intents ?? [],
     intentThreshold: INTENT_CLASSIFICATION_THRESHOLD,
     primaryIntentScore: modelOutput.primaryIntentScore,
+    queue: row.queue,
     urgency: modelOutput.urgency,
     urgencySource: modelOutput.urgencySource,
+    machineUrgency: row.machineSelectedUrgency,
+    machineUrgencySource: row.machineSelectedUrgencySource,
+    isUrgencyManuallyOverridden: row.isUrgencyManuallyOverridden,
     matchedUrgencyKeywords: modelOutput.matchedUrgencyKeywords,
     patientUrgencyMarker: modelOutput.patientUrgencyMarker,
     status: row.status,
@@ -891,6 +910,7 @@ function getLatestCallerContext(db, callerPhone) {
             sv.clinic_id,
             vas.queue_id,
             vas.assigned_gp_id,
+            vas.urgency_override,
             vas.owner_label,
             vas.status,
             vas.status_note,
@@ -931,6 +951,7 @@ export function initDatabase() {
   db.exec(schemaSql);
   ensureReferenceCompatibility(db);
   ensureTaxonomyCompatibility(db);
+  ensureAdminStateCompatibility(db);
   insertSeedData(db);
   syncIntentClassificationLookups(db);
   syncUrgencyKeywordSimilarityLookups(db);
@@ -1028,6 +1049,7 @@ export function getVoicemails(db) {
       sv.recommended_steps AS next_step,
       sv.transcription_confidence,
       COALESCE(vas.status, 'New') AS status,
+      vas.urgency_override,
       vas.status_note,
       vas.status_note_type,
       COALESCE(vas.owner_label, q.default_owner_label) AS owner_label,
@@ -1068,8 +1090,11 @@ export function getVoicemails(db) {
     return {
       ...row,
       keywordUrgencySuggestion,
-      resolvedUrgency: patientUrgencyMarker?.urgency ?? keywordUrgencySuggestion.urgency,
+      machineSelectedUrgency: patientUrgencyMarker?.urgency ?? keywordUrgencySuggestion.urgency,
+      machineSelectedUrgencySource: patientUrgencyMarker ? "patient urgency marker" : keywordUrgencySuggestion.urgencySource,
+      resolvedUrgency: row.urgency_override ?? patientUrgencyMarker?.urgency ?? keywordUrgencySuggestion.urgency,
       patientUrgencyMarker,
+      isUrgencyManuallyOverridden: Boolean(row.urgency_override),
     };
   });
 
@@ -1082,9 +1107,17 @@ export function getVoicemails(db) {
 
   const classifiedRows = rowsWithUrgencySignals.map((row) => {
     const intentsForVoicemail = buildIntentCandidates(row, classificationsByVoicemail);
-    const aiWorkflow = runPrototypeVoicemailModel(
+    const machineWorkflow = runPrototypeVoicemailModel(
       buildVoicemailModelInput(row, rowsByPhone, intentsForVoicemail, row.keywordUrgencySuggestion),
     );
+    const aiWorkflow = {
+      ...machineWorkflow,
+      output: {
+        ...machineWorkflow.output,
+        urgency: row.resolvedUrgency,
+        urgencySource: row.isUrgencyManuallyOverridden ? "manual staff override" : machineWorkflow.output.urgencySource,
+      },
+    };
 
     return {
       ...row,
@@ -1318,8 +1351,19 @@ export function updateVoicemail(db, id, patch) {
   let ownerLabel = patch.owner ?? current.owner_label;
   let assignedGpId = current.assigned_gp_id;
   let status = patch.status ?? current.status ?? "New";
+  let urgencyOverride = current.urgency_override ?? null;
   let statusNote = patch.resolutionNote ?? current.status_note ?? "";
   let statusNoteType = current.status_note_type ?? null;
+
+  if (patch.revertUrgency === true) {
+    urgencyOverride = null;
+  } else if (patch.urgencyOverride != null) {
+    const normalizedUrgency = String(patch.urgencyOverride).trim();
+    if (!Object.hasOwn(urgencyRank, normalizedUrgency)) {
+      throw new Error("Valid urgency override is required");
+    }
+    urgencyOverride = normalizedUrgency;
+  }
 
   if (patch.status === "Resolved") {
     statusNote = String(patch.resolutionNote || "").trim();
@@ -1365,18 +1409,19 @@ export function updateVoicemail(db, id, patch) {
   db.prepare(
     `
       INSERT INTO voicemail_admin_states (
-        caller_phone, queue_id, assigned_gp_id, owner_label, status, status_note, status_note_type, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        caller_phone, queue_id, assigned_gp_id, owner_label, status, urgency_override, status_note, status_note_type, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(caller_phone) DO UPDATE SET
         queue_id = excluded.queue_id,
         assigned_gp_id = excluded.assigned_gp_id,
         owner_label = excluded.owner_label,
         status = excluded.status,
+        urgency_override = excluded.urgency_override,
         status_note = excluded.status_note,
         status_note_type = excluded.status_note_type,
         updated_at = excluded.updated_at
     `,
-  ).run(id, queueId, assignedGpId, ownerLabel, status, statusNote, statusNoteType, new Date().toISOString());
+  ).run(id, queueId, assignedGpId, ownerLabel, status, urgencyOverride, statusNote, statusNoteType, new Date().toISOString());
 
   return getVoicemails(db).find((item) => item.id === id) ?? null;
 }

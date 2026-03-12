@@ -33,6 +33,9 @@ function buildSelectedVoicemail(group, voicemailId) {
     primaryIntentScore: selectedEntry.primaryIntentScore,
     urgency: selectedEntry.urgency,
     urgencySource: selectedEntry.urgencySource,
+    machineUrgency: selectedEntry.machineUrgency,
+    machineUrgencySource: selectedEntry.machineUrgencySource,
+    isUrgencyManuallyOverridden: selectedEntry.isUrgencyManuallyOverridden,
     matchedUrgencyKeywords: selectedEntry.matchedUrgencyKeywords,
     patientUrgencyMarker: selectedEntry.patientUrgencyMarker,
     reason: selectedEntry.reason,
@@ -44,7 +47,7 @@ function buildSelectedVoicemail(group, voicemailId) {
   };
 }
 
-export default function HarbourToSunsetVoicemailPrototype() {
+export default function VoicemailPrototype() {
   const [items, setItems] = useState([]);
   const [queues, setQueues] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState(null);

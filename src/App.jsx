@@ -1,5 +1,5 @@
-import HarbourToSunsetVoicemailPrototype from "./features/voicemail/HarbourToSunsetVoicemailPrototype";
+import VoicemailPrototype from "./features/voicemail/VoicemailPrototype";
 
 export default function App() {
-  return <HarbourToSunsetVoicemailPrototype />;
+  return <VoicemailPrototype />;
 }
