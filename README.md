@@ -76,7 +76,7 @@ Primary table groups:
 ### Admin workflow state
 - `voicemail_admin_states`
   - grouped by caller phone number
-  - stores queue ownership, status, and admin notes
+  - stores queue ownership, status, urgency override, and admin notes
 
 ## Data model notes
 
