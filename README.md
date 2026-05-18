@@ -37,6 +37,11 @@ Run the API only:
 npm start
 ```
 
+Gemini transcription setup:
+
+- set `GEMINI_API_KEY` or `GEMINI_KEY`
+- optional: set `GEMINI_TRANSCRIPTION_MODEL`
+
 ## Database
 
 The backend uses SQLite and bootstraps from the schema files in `server/db/schema/` plus seed data in `server/db/seeds/`.
@@ -96,10 +101,53 @@ Primary table groups:
 - `GET /api/voicemails`
 - `PATCH /api/voicemails/:id`
 - `GET /api/raw-voicemails`
+- `POST /api/transcriptions/gemini`
+- `POST /api/transcriptions/gemini-upload`
 - `GET /api/voicemails/:voicemailId/intents`
 - `GET /api/voicemails/:voicemailId/urgency`
 - `GET /api/voicemails/:voicemailId/structured-transcription`
 - `GET /api/phone-numbers/:phoneNumber/structured-transcriptions`
+
+Gemini transcription request body:
+
+```json
+{
+  "audioPath": "C:\\path\\to\\voicemail.mp3",
+  "mimeType": "audio/mpeg",
+  "model": "gemini-3-flash-preview",
+  "prompt": "Generate a verbatim transcript of the speech in this audio file.",
+  "displayName": "voicemail.mp3"
+}
+```
+
+Gemini browser upload transcription:
+
+- endpoint: `POST /api/transcriptions/gemini-upload`
+- request body: raw audio bytes
+- required request header: audio `Content-Type`
+- optional request header: `X-File-Name`
+- required query params for dashboard persistence:
+  - `callerPhone`
+  - `clinicId`
+- optional query params:
+  - `model`
+  - `prompt`
+  - `displayName`
+
+Frontend helper:
+
+- `transcribeAudioFileWithGemini(file, { callerPhone, clinicId, model, prompt, displayName })`
+
+Dashboard support:
+
+- the dashboard now includes voicemail upload controls
+- you can:
+  - record audio in the browser and stop to transcribe
+  - upload an audio file and transcribe it
+- each successful transcription is persisted into:
+  - `raw_voicemails`
+  - `structured_voicemails`
+- the new upload is then shown as a real voicemail item in the dashboard inbox
 
 ### Intents
 - `GET /api/intents`

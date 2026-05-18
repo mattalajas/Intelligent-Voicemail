@@ -1,5 +1,5 @@
 import React from "react";
-import { Pencil, Phone, Play, RefreshCw } from "lucide-react";
+import { Archive, Pencil, Phone, Play, RefreshCw } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -11,11 +11,21 @@ import {
   urgencyStyles,
 } from "./constants";
 
-export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
+export function VoicemailDetails({ selected, queues, updateItem, isSaving, isRetranscribing, retranscribeVoicemail }) {
+  const audioRef = React.useRef(null);
   const relatedHistory = selected?.history?.filter((entry) => entry.voicemailId !== selected.selectedVoicemailId) ?? [];
   const hasUrgencyKeywordMatches = (selected?.matchedUrgencyKeywords?.length ?? 0) > 0;
   const hasPatientUrgencyMarker = Boolean(selected?.patientUrgencyMarker);
   const hasTranscriptSnapshot = Boolean(selected?.hasTranscriptSnapshot);
+
+  React.useEffect(() => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    audioRef.current.pause();
+    audioRef.current = null;
+  }, [selected?.audioUrl, selected?.selectedVoicemailId]);
 
   function formatDateOfBirth(dateOfBirth) {
     if (!dateOfBirth) {
@@ -132,6 +142,49 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
     }
 
     return selected?.status === status ? tone.active : tone.inactive;
+  }
+
+  async function handlePlayAudio() {
+    if (!selected?.audioUrl) {
+      return;
+    }
+
+    try {
+      if (!audioRef.current) {
+        audioRef.current = new Audio(selected.audioUrl);
+      }
+
+      if (audioRef.current.src !== new URL(selected.audioUrl, window.location.origin).href) {
+        audioRef.current.pause();
+        audioRef.current = new Audio(selected.audioUrl);
+      }
+
+      audioRef.current.currentTime = 0;
+      await audioRef.current.play();
+    } catch (error) {
+      console.error("Unable to play voicemail audio", error);
+      window.alert("Unable to play the saved voicemail audio.");
+    }
+  }
+
+  function handleRetranscribeAudio() {
+    if (!selected?.selectedVoicemailId || !selected?.id || !selected?.audioUrl || isRetranscribing) {
+      return;
+    }
+
+    retranscribeVoicemail?.(selected.selectedVoicemailId, selected.id);
+  }
+
+  function handleArchive() {
+    if (!selected?.id || isSaving) {
+      return;
+    }
+
+    if (!window.confirm("Archive this voicemail entry and remove it from the active inbox?")) {
+      return;
+    }
+
+    updateItem(selected.id, { archive: true });
   }
 
   return (
@@ -266,11 +319,11 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Transcript snapshot</p>
               {hasTranscriptSnapshot && <p className="mt-3 text-sm leading-6 text-slate-700">"{selected.transcript}"</p>}
               <div className="mt-3 flex items-center gap-2">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={handlePlayAudio} disabled={!selected.audioUrl}>
                   <Play className="mr-2 h-4 w-4" /> Play audio
                 </Button>
                 {!hasTranscriptSnapshot && (
-                  <Button variant="outline" size="sm" onClick={() => {}}>
+                  <Button variant="outline" size="sm" onClick={handleRetranscribeAudio} disabled={!selected.audioUrl || isRetranscribing}>
                     <RefreshCw className="mr-2 h-4 w-4" /> Refresh AI
                   </Button>
                 )}
@@ -326,7 +379,7 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                   disabled={isSaving}
                 >
                   Resolved
-                </Button> 
+                </Button>
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Queue actions</p>
@@ -379,6 +432,17 @@ export function VoicemailDetails({ selected, queues, updateItem, isSaving }) {
                     Revert to machine
                   </Button>
                 </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-2" />
+              <hr />
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={handleRetranscribeAudio} disabled={!selected.audioUrl || isRetranscribing}>
+                  <RefreshCw className={`mr-2 h-4 w-4${isRetranscribing ? " animate-spin" : ""}`} />
+                  {isRetranscribing ? "Running Gemini..." : "Run Gemini again"}
+                </Button>
+                <Button variant="outline" onClick={handleArchive} disabled={isSaving}>
+                  <Archive className="mr-2 h-4 w-4" /> Archive
+                </Button>
               </div>
             </div>
           </div>

@@ -1,11 +1,13 @@
 import { statusOrder, urgencyOrder } from "./constants";
 
 export function getCounts(items) {
+  const visibleItems = items.filter((item) => !item.isArchived);
+
   return {
-    total: items.length,
-    critical: items.filter((item) => item.urgency === "Critical").length,
-    sameDay: items.filter((item) => item.queue === "Same-Day Appointments").length,
-    unresolved: items.filter((item) => item.status !== "Resolved").length,
+    total: visibleItems.length,
+    critical: visibleItems.filter((item) => item.urgency === "Critical").length,
+    sameDay: visibleItems.filter((item) => item.queue === "Same-Day Appointments").length,
+    unresolved: visibleItems.filter((item) => item.status !== "Resolved").length,
   };
 }
 
@@ -14,6 +16,10 @@ export function filterVoicemails(items, search, queueFilter, statusFilter, urgen
 
   return items
     .filter((item) => {
+      if (item.isArchived) {
+        return false;
+      }
+
       const matchingIntentLabels = item.intents?.some((intent) => intent.label.toLowerCase().includes(query));
       const matchesSearch =
         item.patient.toLowerCase().includes(query) ||

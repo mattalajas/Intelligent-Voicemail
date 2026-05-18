@@ -23,6 +23,8 @@ export const patients = [
   { id: 8, fullName: "Mia Carter", dateOfBirth: "1994-05-30", phone: "029 555 884", clinicId: 2 },
   { id: 9, fullName: "Liam Foster", dateOfBirth: "1978-01-22", phone: "021 555 993", clinicId: 1 },
   { id: 10, fullName: "Grace Miller", dateOfBirth: "1986-08-11", phone: "022 555 612", clinicId: 2 },
+  { id: 11, fullName: "Matt Alajas", dateOfBirth: "2000-05-06", phone: "021 174 227", clinicId: 1 },
+  { id: 12, fullName: "Nick Alajas", dateOfBirth: "2001-05-06", phone: "211 742 278", clinicId: 1 },
 ];
 
 export const patientGpRelationships = [
@@ -37,5 +39,7 @@ export const patientGpRelationships = [
   { patientId: 8, gpId: 2, relationshipType: "primary", isPrimary: 1 },
   { patientId: 9, gpId: 1, relationshipType: "primary", isPrimary: 1 },
   { patientId: 10, gpId: 2, relationshipType: "primary", isPrimary: 1 },
+  { patientId: 11, gpId: 1, relationshipType: "primary", isPrimary: 1 },
+  { patientId: 12, gpId: 1, relationshipType: "primary", isPrimary: 1 },
   { patientId: 7, gpId: 3, relationshipType: "covering", isPrimary: 0 },
 ];

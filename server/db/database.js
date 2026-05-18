@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,8 +28,13 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dataDir = path.join(__dirname, "data");
-const dbPath = path.join(dataDir, "voicemail.sqlite");
+const dataDir = process.env.VOICEMAIL_DATA_DIR
+  ? path.resolve(process.cwd(), process.env.VOICEMAIL_DATA_DIR)
+  : path.join(__dirname, "data");
+const audioDir = path.join(dataDir, "audio");
+const dbPath = process.env.VOICEMAIL_DB_PATH
+  ? path.resolve(process.cwd(), process.env.VOICEMAIL_DB_PATH)
+  : path.join(dataDir, "voicemail.sqlite");
 const schemaPaths = [
   path.join(__dirname, "schema", "clinic", "reference.sql"),
   path.join(__dirname, "schema", "clinicModel", "config.sql"),
@@ -66,10 +71,42 @@ const lowUrgencySimilarityScoreByUrgency = {
   Low: 0.06,
 };
 
+function toAudioUrl(audioFilePath) {
+  const normalizedAudioFilePath = String(audioFilePath || "").trim();
+  if (!normalizedAudioFilePath) {
+    return null;
+  }
+
+  const encodedSegments = normalizedAudioFilePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment));
+
+  return encodedSegments.length ? `/media/voicemails/${encodedSegments.join("/")}` : null;
+}
+
 function ensureDataDir() {
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
+  if (!existsSync(audioDir)) {
+    mkdirSync(audioDir, { recursive: true });
+  }
+}
+
+function clearStoredAudioFiles() {
+  if (!existsSync(audioDir)) {
+    return;
+  }
+
+  readdirSync(audioDir, { withFileTypes: true }).forEach((entry) => {
+    if (!entry.isFile()) {
+      return;
+    }
+
+    unlinkSync(path.join(audioDir, entry.name));
+  });
 }
 
 function getColumnNames(db, tableName) {
@@ -87,6 +124,24 @@ function ensureReferenceCompatibility(db) {
     db.exec(`
       ALTER TABLE patients
       ADD COLUMN date_of_birth TEXT NOT NULL DEFAULT '1900-01-01'
+    `);
+  }
+}
+
+function ensureVoicemailStorageCompatibility(db) {
+  const rawVoicemailColumns = getColumnNames(db, "raw_voicemails");
+  if (!rawVoicemailColumns.has("audio_file_path")) {
+    db.exec(`
+      ALTER TABLE raw_voicemails
+      ADD COLUMN audio_file_path TEXT
+    `);
+  }
+
+  const structuredVoicemailColumns = getColumnNames(db, "structured_voicemails");
+  if (!structuredVoicemailColumns.has("audio_file_path")) {
+    db.exec(`
+      ALTER TABLE structured_voicemails
+      ADD COLUMN audio_file_path TEXT
     `);
   }
 }
@@ -169,6 +224,12 @@ function ensureAdminStateCompatibility(db) {
       ALTER TABLE voicemail_admin_states
       ADD COLUMN urgency_override TEXT
       CHECK (urgency_override IN ('Critical', 'High', 'Normal', 'Low', 'Unknown') OR urgency_override IS NULL)
+    `);
+  }
+  if (!adminStateColumns.has("is_archived")) {
+    db.exec(`
+      ALTER TABLE voicemail_admin_states
+      ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1))
     `);
   }
 }
@@ -254,6 +315,7 @@ function insertSeedData(db) {
       caller_phone,
       clinic_id,
       received_at,
+      audio_file_path,
       transcription,
       transcription_confidence,
       transcription_summary,
@@ -266,6 +328,7 @@ function insertSeedData(db) {
       @callerPhone,
       @clinicId,
       @receivedAt,
+      @audioFilePath,
       @transcription,
       @transcriptionConfidence,
       @transcriptionSummary,
@@ -278,6 +341,7 @@ function insertSeedData(db) {
       caller_phone = excluded.caller_phone,
       clinic_id = excluded.clinic_id,
       received_at = excluded.received_at,
+      audio_file_path = excluded.audio_file_path,
       transcription = excluded.transcription,
       transcription_confidence = excluded.transcription_confidence,
       transcription_summary = excluded.transcription_summary,
@@ -290,17 +354,20 @@ function insertSeedData(db) {
       transcription,
       clinic_id,
       received_at,
-      patient_name
+      patient_name,
+      audio_file_path
     ) VALUES (
       @callerPhone,
       @transcription,
       @clinicId,
       @receivedAt,
-      @patientName
+      @patientName,
+      @audioFilePath
     )
     ON CONFLICT(caller_phone, clinic_id, received_at) DO UPDATE SET
       transcription = excluded.transcription,
-      patient_name = excluded.patient_name
+      patient_name = excluded.patient_name,
+      audio_file_path = excluded.audio_file_path
   `);
   const insertVoicemailIntentClassification = db.prepare(`
     INSERT INTO voicemail_intent_classifications (voicemail_id, intent_id, classification_score, intent_label_snapshot)
@@ -321,15 +388,16 @@ function insertSeedData(db) {
   `);
   const insertVoicemailAdminState = db.prepare(`
     INSERT INTO voicemail_admin_states (
-      caller_phone, queue_id, assigned_gp_id, owner_label, status, urgency_override, status_note, status_note_type, updated_at
+      caller_phone, queue_id, assigned_gp_id, owner_label, status, is_archived, urgency_override, status_note, status_note_type, updated_at
     ) VALUES (
-      @callerPhone, @queueId, @assignedGpId, @ownerLabel, @status, @urgencyOverride, @statusNote, @statusNoteType, @updatedAt
+      @callerPhone, @queueId, @assignedGpId, @ownerLabel, @status, @isArchived, @urgencyOverride, @statusNote, @statusNoteType, @updatedAt
     )
     ON CONFLICT(caller_phone) DO UPDATE SET
       queue_id = excluded.queue_id,
       assigned_gp_id = excluded.assigned_gp_id,
       owner_label = excluded.owner_label,
       status = excluded.status,
+      is_archived = excluded.is_archived,
       urgency_override = excluded.urgency_override,
       status_note = excluded.status_note,
       status_note_type = excluded.status_note_type,
@@ -346,14 +414,41 @@ function insertSeedData(db) {
     intentQueueRoutes.forEach((row) => insertIntentQueueRoute.run(row));
     urgencyKeywords.forEach((row) => insertUrgencyKeyword.run(row));
     patientUrgencyMarkers.forEach((row) => insertPatientUrgencyMarker.run(row));
-    rawVoicemails.forEach((row) => insertRawVoicemail.run(row));
-    structuredVoicemails.forEach((row) => insertStructuredVoicemail.run(row));
+    rawVoicemails.forEach((row) => insertRawVoicemail.run({ audioFilePath: null, ...row }));
+    structuredVoicemails.forEach((row) => insertStructuredVoicemail.run({ audioFilePath: null, ...row }));
     voicemailIntentClassifications.forEach((row) => insertVoicemailIntentClassification.run(row));
     voicemailUrgencyKeywordSimilarities.forEach((row) => insertVoicemailUrgencyKeywordSimilarity.run(row));
-    voicemailAdminStates.forEach((row) => insertVoicemailAdminState.run({ urgencyOverride: null, ...row }));
+    voicemailAdminStates.forEach((row) => insertVoicemailAdminState.run({ isArchived: 0, urgencyOverride: null, ...row }));
   });
 
   seed();
+}
+
+export function reseedDatabase(db) {
+  const reset = db.transaction(() => {
+    db.exec(`
+      DELETE FROM voicemail_admin_states;
+      DELETE FROM voicemail_urgency_keyword_similarities;
+      DELETE FROM voicemail_intent_classifications;
+      DELETE FROM raw_voicemails;
+      DELETE FROM structured_voicemails;
+      DELETE FROM patient_urgency_markers;
+      DELETE FROM intent_queue_routes;
+      DELETE FROM urgency_keywords;
+      DELETE FROM intents;
+      DELETE FROM queues;
+      DELETE FROM patient_gp_relationships;
+      DELETE FROM patients;
+      DELETE FROM gps;
+      DELETE FROM clinics;
+    `);
+    clearStoredAudioFiles();
+    insertSeedData(db);
+    syncIntentClassificationLookups(db);
+    syncUrgencyKeywordSimilarityLookups(db);
+  });
+
+  reset();
 }
 
 function formatTimeLabel(isoString) {
@@ -429,6 +524,34 @@ function getTargetClinicIds(db, clinicId = null) {
     .map((row) => row.clinicId);
 }
 
+function getActiveIntentTaxonomyForClinic(db, clinicId) {
+  return db
+    .prepare(
+      `
+        SELECT id, label
+        FROM intents
+        WHERE is_active = 1
+          AND (clinic_id IS NULL OR clinic_id = ?)
+        ORDER BY is_system DESC, label ASC
+      `,
+    )
+    .all(clinicId);
+}
+
+function getActiveUrgencyKeywordTaxonomyForClinic(db, clinicId) {
+  return db
+    .prepare(
+      `
+        SELECT id, keyword, urgency
+        FROM urgency_keywords
+        WHERE is_active = 1
+          AND (clinic_id IS NULL OR clinic_id = ?)
+        ORDER BY is_system DESC, keyword ASC
+      `,
+    )
+    .all(clinicId);
+}
+
 function syncIntentClassificationLookups(db, clinicId = null) {
   const upsertClassification = db.prepare(`
     INSERT INTO voicemail_intent_classifications (
@@ -443,17 +566,7 @@ function syncIntentClassificationLookups(db, clinicId = null) {
 
   const sync = db.transaction((targetClinicIds) => {
     targetClinicIds.forEach((targetClinicId) => {
-      const activeIntents = db
-        .prepare(
-          `
-            SELECT id, label
-            FROM intents
-            WHERE is_active = 1
-              AND (clinic_id IS NULL OR clinic_id = ?)
-            ORDER BY is_system DESC, label ASC
-          `,
-        )
-        .all(targetClinicId);
+      const activeIntents = getActiveIntentTaxonomyForClinic(db, targetClinicId);
 
       const voicemailIds = db
         .prepare("SELECT voicemail_id AS voicemailId FROM structured_voicemails WHERE clinic_id = ? ORDER BY voicemail_id ASC")
@@ -513,17 +626,7 @@ function syncUrgencyKeywordSimilarityLookups(db, clinicId = null) {
 
   const sync = db.transaction((targetClinicIds) => {
     targetClinicIds.forEach((targetClinicId) => {
-      const activeUrgencyKeywords = db
-        .prepare(
-          `
-            SELECT id, keyword, urgency
-            FROM urgency_keywords
-            WHERE is_active = 1
-              AND (clinic_id IS NULL OR clinic_id = ?)
-            ORDER BY is_system DESC, keyword ASC
-          `,
-        )
-        .all(targetClinicId);
+      const activeUrgencyKeywords = getActiveUrgencyKeywordTaxonomyForClinic(db, targetClinicId);
 
       const voicemailIds = db
         .prepare("SELECT voicemail_id AS voicemailId FROM structured_voicemails WHERE clinic_id = ? ORDER BY voicemail_id ASC")
@@ -600,6 +703,7 @@ function getStructuredVoicemailRecord(db, voicemailId) {
           sv.caller_name AS callerName,
           sv.caller_phone AS callerPhone,
           sv.received_at AS receivedAt,
+          sv.audio_file_path AS audioFilePath,
           ? AS model,
           sv.transcription AS transcription,
           sv.transcription_confidence AS transcriptionConfidence,
@@ -613,6 +717,42 @@ function getStructuredVoicemailRecord(db, voicemailId) {
       `,
     )
     .get(PROTOTYPE_VOICEMAIL_MODEL, voicemailId);
+}
+
+export function getStoredAudioPathForVoicemail(db, voicemailId) {
+  const record = getStructuredVoicemailRecord(db, voicemailId);
+  const normalizedAudioFilePath = String(record?.audioFilePath || "").trim();
+
+  if (!record || !normalizedAudioFilePath) {
+    return null;
+  }
+
+  return {
+    voicemailId: record.voicemailId,
+    callerPhone: record.callerPhone,
+    clinicId: record.clinicId,
+    receivedAt: record.receivedAt,
+    audioFilePath: normalizedAudioFilePath,
+  };
+}
+
+export function getGeminiVoicemailTaxonomy(db, clinicId) {
+  const normalizedClinicId = Number(clinicId);
+  if (!Number.isInteger(normalizedClinicId) || normalizedClinicId <= 0) {
+    throw new Error("Valid clinicId is required");
+  }
+
+  return {
+    intents: getActiveIntentTaxonomyForClinic(db, normalizedClinicId).map((intent) => ({
+      id: intent.id,
+      label: intent.label,
+    })),
+    urgencyKeywords: getActiveUrgencyKeywordTaxonomyForClinic(db, normalizedClinicId).map((keyword) => ({
+      id: keyword.id,
+      keyword: keyword.keyword,
+      urgency: keyword.urgency,
+    })),
+  };
 }
 
 function getVoicemailUrgencyContext(db, voicemailId) {
@@ -749,6 +889,7 @@ function mapVoicemailRow(row) {
     queue: row.queue,
     owner: row.owner_label,
     status: row.status,
+    isArchived: Boolean(row.isArchived),
     intentConfidence: modelOutput.intentConfidence,
     transcriptionConfidence: modelOutput.transcriptionConfidence,
     reason,
@@ -757,6 +898,7 @@ function mapVoicemailRow(row) {
     resolutionNote: row.status_note ?? "",
     resolutionNoteType: row.status_note_type ?? null,
     transcript,
+    audioUrl: toAudioUrl(row.audio_file_path),
     hasTranscriptSnapshot,
     patientDateOfBirth: row.patient_date_of_birth,
     primaryGp: row.primary_gp_name,
@@ -791,6 +933,7 @@ function buildHistoryEntry(row) {
     matchedUrgencyKeywords: modelOutput.matchedUrgencyKeywords,
     patientUrgencyMarker: modelOutput.patientUrgencyMarker,
     status: row.status,
+    isArchived: Boolean(row.isArchived),
     intentConfidence: modelOutput.intentConfidence,
     transcriptionConfidence: modelOutput.transcriptionConfidence,
     reason,
@@ -798,6 +941,7 @@ function buildHistoryEntry(row) {
     resolutionNote: row.status_note ?? "",
     resolutionNoteType: row.status_note_type ?? null,
     transcript,
+    audioUrl: toAudioUrl(row.audio_file_path),
     hasTranscriptSnapshot,
     patientDateOfBirth: row.patient_date_of_birth,
     nextStep: modelOutput.nextStep,
@@ -910,6 +1054,7 @@ function getLatestCallerContext(db, callerPhone) {
             sv.clinic_id,
             vas.queue_id,
             vas.assigned_gp_id,
+            vas.is_archived,
             vas.urgency_override,
             vas.owner_label,
             vas.status,
@@ -943,6 +1088,108 @@ function getQueueForClinicByName(db, clinicId, queueName) {
   );
 }
 
+function getQueueRouteForIntent(db, clinicId, intentId) {
+  if (!clinicId || !intentId) {
+    return null;
+  }
+
+  return (
+    db
+      .prepare(
+        `
+          SELECT
+            q.id,
+            q.name,
+            q.default_owner_label
+          FROM intent_queue_routes iqr
+          JOIN queues q ON q.id = iqr.queue_id
+          WHERE iqr.clinic_id = ? AND iqr.intent_id = ?
+          LIMIT 1
+        `,
+      )
+      .get(clinicId, intentId) ?? null
+  );
+}
+
+function resolveQueueAssignment(db, callerPhone, queue) {
+  if (!queue) {
+    return {
+      queueId: null,
+      ownerLabel: "Front desk",
+      assignedGpId: null,
+    };
+  }
+
+  if (queue.name === "GP Callbacks") {
+    const primaryGp = getPrimaryGpForCaller(db, callerPhone);
+    return {
+      queueId: queue.id,
+      ownerLabel: primaryGp?.name ?? "Front desk",
+      assignedGpId: primaryGp?.id ?? null,
+    };
+  }
+
+  const gp = db.prepare("SELECT id FROM gps WHERE name = ?").get(queue.default_owner_label);
+  return {
+    queueId: queue.id,
+    ownerLabel: queue.default_owner_label,
+    assignedGpId: gp ? gp.id : null,
+  };
+}
+
+function upsertVoicemailAdminState(db, callerPhone, state) {
+  db.prepare(
+    `
+      INSERT INTO voicemail_admin_states (
+        caller_phone, queue_id, assigned_gp_id, owner_label, status, is_archived, urgency_override, status_note, status_note_type, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(caller_phone) DO UPDATE SET
+        queue_id = excluded.queue_id,
+        assigned_gp_id = excluded.assigned_gp_id,
+        owner_label = excluded.owner_label,
+        status = excluded.status,
+        is_archived = excluded.is_archived,
+        urgency_override = excluded.urgency_override,
+        status_note = excluded.status_note,
+        status_note_type = excluded.status_note_type,
+        updated_at = excluded.updated_at
+  `,
+  ).run(
+    callerPhone,
+    state.queueId,
+    state.assignedGpId,
+    state.ownerLabel,
+    state.status,
+    state.isArchived ? 1 : 0,
+    state.urgencyOverride,
+    state.statusNote,
+    state.statusNoteType,
+    state.updatedAt ?? new Date().toISOString(),
+  );
+}
+
+function findPatientByPhoneAndClinic(db, callerPhone, clinicId) {
+  return (
+    db
+      .prepare(
+        `
+          SELECT
+            id,
+            full_name AS fullName,
+            clinic_id AS clinicId
+          FROM patients
+          WHERE phone = ? AND clinic_id = ?
+          LIMIT 1
+        `,
+      )
+      .get(callerPhone, clinicId) ?? null
+  );
+}
+
+function generateVoicemailId() {
+  return `VM-UP-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
 export function initDatabase() {
   ensureDataDir();
   const db = new Database(dbPath);
@@ -950,6 +1197,7 @@ export function initDatabase() {
   db.pragma("foreign_keys = ON");
   db.exec(schemaSql);
   ensureReferenceCompatibility(db);
+  ensureVoicemailStorageCompatibility(db);
   ensureTaxonomyCompatibility(db);
   ensureAdminStateCompatibility(db);
   insertSeedData(db);
@@ -969,13 +1217,18 @@ export function getRawVoicemails(db) {
           rv.clinic_id AS clinicId,
           c.name AS clinicName,
           rv.received_at AS receivedAt,
-          rv.patient_name AS patientName
+          rv.patient_name AS patientName,
+          rv.audio_file_path AS audioFilePath
         FROM raw_voicemails rv
         JOIN clinics c ON c.id = rv.clinic_id
         ORDER BY datetime(rv.received_at) DESC, rv.caller_phone ASC
       `,
     )
-    .all();
+    .all()
+    .map((row) => ({
+      ...row,
+      audioUrl: toAudioUrl(row.audioFilePath),
+    }));
 }
 
 export function getVoicemails(db) {
@@ -1043,12 +1296,14 @@ export function getVoicemails(db) {
       c.name AS location,
       sv.caller_phone AS phone,
       sv.received_at,
+      sv.audio_file_path,
       ? AS model_name,
       sv.reason_for_call AS reason,
       sv.transcription_summary AS summary,
       sv.recommended_steps AS next_step,
       sv.transcription_confidence,
       COALESCE(vas.status, 'New') AS status,
+      COALESCE(vas.is_archived, 0) AS is_archived,
       vas.urgency_override,
       vas.status_note,
       vas.status_note_type,
@@ -1094,6 +1349,7 @@ export function getVoicemails(db) {
       machineSelectedUrgencySource: patientUrgencyMarker ? "patient urgency marker" : keywordUrgencySuggestion.urgencySource,
       resolvedUrgency: row.urgency_override ?? patientUrgencyMarker?.urgency ?? keywordUrgencySuggestion.urgency,
       patientUrgencyMarker,
+      isArchived: Boolean(row.is_archived),
       isUrgencyManuallyOverridden: Boolean(row.urgency_override),
     };
   });
@@ -1287,6 +1543,7 @@ export function getStructuredVoicemailTranscription(db, voicemailId) {
     clinicName: structuredVoicemail.clinicName,
     receivedAt: structuredVoicemail.receivedAt,
     callerPhone: structuredVoicemail.callerPhone,
+    audioUrl: toAudioUrl(structuredVoicemail.audioFilePath),
     transcription: structuredVoicemail.transcription,
     transcriptionConfidence: structuredVoicemail.transcriptionConfidence,
     transcriptionSummary: structuredVoicemail.transcriptionSummary,
@@ -1341,6 +1598,398 @@ export function getStructuredVoicemailTranscriptionsByPhone(db, callerPhone) {
     .filter(Boolean);
 }
 
+export function createUploadedVoicemailTranscript(
+  db,
+  {
+    callerPhone,
+    clinicId,
+    transcript,
+    summary,
+    reasonForCall,
+    recommendedSteps,
+    intentScores = [],
+    urgencyKeywordScores = [],
+    audioFilePath = null,
+    transcriptionConfidence = "Medium",
+  } = {},
+) {
+  const normalizedCallerPhone = String(callerPhone || "").trim();
+  const normalizedTranscript = String(transcript || "").trim();
+  const normalizedClinicId = Number(clinicId);
+  const normalizedAudioFilePath = audioFilePath == null ? null : String(audioFilePath).trim() || null;
+  const normalizedConfidence = String(transcriptionConfidence || "Medium").trim();
+
+  if (!normalizedCallerPhone) {
+    throw new Error("callerPhone is required");
+  }
+
+  if (!Number.isInteger(normalizedClinicId) || normalizedClinicId <= 0) {
+    throw new Error("clinicId is required");
+  }
+
+  if (!normalizedTranscript) {
+    throw new Error("Transcript is required");
+  }
+
+  if (!["High", "Medium", "Low"].includes(normalizedConfidence)) {
+    throw new Error("Valid transcription confidence is required");
+  }
+
+  const clinic = db.prepare("SELECT id, name FROM clinics WHERE id = ?").get(normalizedClinicId);
+  if (!clinic) {
+    throw new Error("Clinic not found");
+  }
+
+  const patient = findPatientByPhoneAndClinic(db, normalizedCallerPhone, normalizedClinicId);
+  const receivedAt = new Date().toISOString();
+  const voicemailId = generateVoicemailId();
+  const normalizedSummary = String(summary || "").trim() || normalizedTranscript;
+  const normalizedReasonForCall =
+    String(reasonForCall || "").trim() || "Uploaded voicemail transcript awaiting review.";
+  const normalizedRecommendedSteps =
+    String(recommendedSteps || "").trim() || "Review transcript and route manually.";
+
+  const insertRawVoicemail = db.prepare(`
+    INSERT INTO raw_voicemails (
+      caller_phone,
+      transcription,
+      clinic_id,
+      received_at,
+      patient_name,
+      audio_file_path
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertStructuredVoicemail = db.prepare(`
+    INSERT INTO structured_voicemails (
+      voicemail_id,
+      patient_id,
+      caller_name,
+      caller_phone,
+      clinic_id,
+      received_at,
+      audio_file_path,
+      transcription,
+      transcription_confidence,
+      transcription_summary,
+      reason_for_call,
+      recommended_steps
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertAdminState = db.prepare(`
+    INSERT INTO voicemail_admin_states (
+      caller_phone, queue_id, assigned_gp_id, owner_label, status, is_archived, urgency_override, status_note, status_note_type, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(caller_phone) DO NOTHING
+  `);
+
+  const write = db.transaction(() => {
+    insertRawVoicemail.run(
+      normalizedCallerPhone,
+      normalizedTranscript,
+      normalizedClinicId,
+      receivedAt,
+      patient?.fullName ?? null,
+      normalizedAudioFilePath,
+    );
+
+    insertStructuredVoicemail.run(
+      voicemailId,
+      patient?.id ?? null,
+      patient ? null : "Unknown caller",
+      normalizedCallerPhone,
+      normalizedClinicId,
+      receivedAt,
+      normalizedAudioFilePath,
+      normalizedTranscript,
+      normalizedConfidence,
+      normalizedSummary,
+      normalizedReasonForCall,
+      normalizedRecommendedSteps,
+    );
+
+    insertAdminState.run(
+      normalizedCallerPhone,
+      7,
+      null,
+      "Front desk",
+      "New",
+      0,
+      null,
+      null,
+      null,
+      receivedAt,
+    );
+  });
+
+  write();
+  syncIntentClassificationLookups(db, normalizedClinicId);
+  syncUrgencyKeywordSimilarityLookups(db, normalizedClinicId);
+  persistGeminiVoicemailAnalysis(db, voicemailId, normalizedClinicId, {
+    transcription: normalizedTranscript,
+    transcriptionConfidence: normalizedConfidence,
+    summary: normalizedSummary,
+    reasonForCall: normalizedReasonForCall,
+    recommendedSteps: normalizedRecommendedSteps,
+    intentScores,
+    urgencyKeywordScores,
+  });
+  reopenCallerForNewVoicemail(db, normalizedCallerPhone);
+
+  const item = getVoicemails(db).find((entry) => entry.id === normalizedCallerPhone) ?? null;
+  return {
+    voicemailId,
+    item,
+  };
+}
+
+export function refreshVoicemailTranscript(
+  db,
+  voicemailId,
+  {
+    transcript,
+    summary,
+    reasonForCall,
+    recommendedSteps,
+    intentScores = [],
+    urgencyKeywordScores = [],
+    transcriptionConfidence = "Medium",
+  } = {},
+) {
+  const normalizedVoicemailId = String(voicemailId || "").trim();
+  const normalizedTranscript = String(transcript || "").trim();
+  const normalizedConfidence = String(transcriptionConfidence || "Medium").trim();
+
+  if (!normalizedVoicemailId) {
+    throw new Error("voicemailId is required");
+  }
+
+  if (!normalizedTranscript) {
+    throw new Error("Transcript is required");
+  }
+
+  if (!["High", "Medium", "Low"].includes(normalizedConfidence)) {
+    throw new Error("Valid transcription confidence is required");
+  }
+
+  const current = getStoredAudioPathForVoicemail(db, normalizedVoicemailId);
+  if (!current) {
+    throw new Error("Stored voicemail audio not found");
+  }
+
+  persistGeminiVoicemailAnalysis(db, normalizedVoicemailId, current.clinicId, {
+    transcription: normalizedTranscript,
+    transcriptionConfidence: normalizedConfidence,
+    summary,
+    reasonForCall,
+    recommendedSteps,
+    intentScores,
+    urgencyKeywordScores,
+  });
+
+  const item = getVoicemails(db).find((entry) => entry.id === current.callerPhone) ?? null;
+  return {
+    voicemailId: normalizedVoicemailId,
+    item,
+  };
+}
+
+function persistGeminiVoicemailAnalysis(
+  db,
+  voicemailId,
+  clinicId,
+  {
+    transcription,
+    transcriptionConfidence = "Medium",
+    summary,
+    reasonForCall,
+    recommendedSteps,
+    intentScores = [],
+    urgencyKeywordScores = [],
+  } = {},
+) {
+  const normalizedVoicemailId = String(voicemailId || "").trim();
+  const normalizedClinicId = Number(clinicId);
+  const normalizedTranscript = String(transcription || "").trim();
+  const normalizedConfidence = String(transcriptionConfidence || "Medium").trim();
+  const normalizedSummary = String(summary || "").trim() || normalizedTranscript;
+  const normalizedReasonForCall = String(reasonForCall || "").trim() || "Reason for call unavailable.";
+  const normalizedRecommendedSteps = String(recommendedSteps || "").trim() || "Review voicemail";
+
+  if (!normalizedVoicemailId) {
+    throw new Error("voicemailId is required");
+  }
+
+  if (!Number.isInteger(normalizedClinicId) || normalizedClinicId <= 0) {
+    throw new Error("Valid clinicId is required");
+  }
+
+  if (!normalizedTranscript) {
+    throw new Error("Transcript is required");
+  }
+
+  if (!["High", "Medium", "Low"].includes(normalizedConfidence)) {
+    throw new Error("Valid transcription confidence is required");
+  }
+
+  const structuredVoicemail = getStructuredVoicemailRecord(db, normalizedVoicemailId);
+  if (!structuredVoicemail) {
+    throw new Error("Structured voicemail not found");
+  }
+
+  const taxonomy = getGeminiVoicemailTaxonomy(db, normalizedClinicId);
+
+  const normalizedIntentScores = taxonomy.intents.map((intent) => {
+    const matchedIntent = intentScores.find(
+      (candidate) => String(candidate?.label || "").trim().toLowerCase() === intent.label.toLowerCase(),
+    );
+
+    return {
+      intentId: intent.id,
+      intentLabelSnapshot: intent.label,
+      classificationScore: normalizeGeminiModelScore(matchedIntent?.score),
+    };
+  });
+
+  const normalizedUrgencyKeywordScores = taxonomy.urgencyKeywords.map((keyword) => {
+    const matchedKeyword = urgencyKeywordScores.find((candidate) => {
+      const normalizedKeyword = String(candidate?.keyword || "").trim().toLowerCase();
+      const normalizedUrgency = String(candidate?.urgency || "").trim();
+      return normalizedKeyword === keyword.keyword.toLowerCase() && normalizedUrgency === keyword.urgency;
+    });
+
+    return {
+      urgencyKeywordId: keyword.id,
+      urgencyKeywordSnapshot: keyword.keyword,
+      urgencyLevelSnapshot: keyword.urgency,
+      similarityScore: normalizeGeminiModelScore(matchedKeyword?.score),
+    };
+  });
+
+  const highestIntent = [...normalizedIntentScores].sort(
+    (a, b) => b.classificationScore - a.classificationScore || a.intentLabelSnapshot.localeCompare(b.intentLabelSnapshot),
+  )[0] ?? null;
+
+  db.transaction(() => {
+    db.prepare(
+      `
+        UPDATE structured_voicemails
+        SET
+          transcription = ?,
+          transcription_confidence = ?,
+          transcription_summary = ?,
+          reason_for_call = ?,
+          recommended_steps = ?
+        WHERE voicemail_id = ?
+      `,
+    ).run(
+      normalizedTranscript,
+      normalizedConfidence,
+      normalizedSummary,
+      normalizedReasonForCall,
+      normalizedRecommendedSteps,
+      normalizedVoicemailId,
+    );
+
+    db.prepare(
+      `
+        UPDATE raw_voicemails
+        SET transcription = ?
+        WHERE caller_phone = ? AND clinic_id = ? AND received_at = ?
+      `,
+    ).run(normalizedTranscript, structuredVoicemail.callerPhone, normalizedClinicId, structuredVoicemail.receivedAt);
+
+    const upsertIntent = db.prepare(
+      `
+        INSERT INTO voicemail_intent_classifications (
+          voicemail_id, intent_id, classification_score, intent_label_snapshot
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(voicemail_id, intent_id) DO UPDATE SET
+          classification_score = excluded.classification_score,
+          intent_label_snapshot = excluded.intent_label_snapshot
+      `,
+    );
+
+    normalizedIntentScores.forEach((intent) => {
+      upsertIntent.run(
+        normalizedVoicemailId,
+        intent.intentId,
+        intent.classificationScore,
+        intent.intentLabelSnapshot,
+      );
+    });
+
+    const upsertUrgencyKeyword = db.prepare(
+      `
+        INSERT INTO voicemail_urgency_keyword_similarities (
+          voicemail_id, urgency_keyword_id, similarity_score, urgency_keyword_snapshot, urgency_level_snapshot
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(voicemail_id, urgency_keyword_id) DO UPDATE SET
+          similarity_score = excluded.similarity_score,
+          urgency_keyword_snapshot = excluded.urgency_keyword_snapshot,
+          urgency_level_snapshot = excluded.urgency_level_snapshot
+      `,
+    );
+
+    normalizedUrgencyKeywordScores.forEach((keyword) => {
+      upsertUrgencyKeyword.run(
+        normalizedVoicemailId,
+        keyword.urgencyKeywordId,
+        keyword.similarityScore,
+        keyword.urgencyKeywordSnapshot,
+        keyword.urgencyLevelSnapshot,
+      );
+    });
+
+    const currentAdminState = getLatestCallerContext(db, structuredVoicemail.callerPhone);
+    const routedQueue = highestIntent ? getQueueRouteForIntent(db, normalizedClinicId, highestIntent.intentId) : null;
+    const queueAssignment = resolveQueueAssignment(db, structuredVoicemail.callerPhone, routedQueue);
+
+    upsertVoicemailAdminState(db, structuredVoicemail.callerPhone, {
+      queueId: queueAssignment.queueId ?? currentAdminState?.queue_id ?? null,
+      assignedGpId: queueAssignment.assignedGpId ?? currentAdminState?.assigned_gp_id ?? null,
+      ownerLabel: queueAssignment.ownerLabel ?? currentAdminState?.owner_label ?? "Front desk",
+      status: currentAdminState?.status ?? "New",
+      isArchived: Boolean(currentAdminState?.is_archived),
+      urgencyOverride: currentAdminState?.urgency_override ?? null,
+      statusNote: currentAdminState?.status_note ?? "",
+      statusNoteType: currentAdminState?.status_note_type ?? null,
+      updatedAt: new Date().toISOString(),
+    });
+  })();
+}
+
+function normalizeGeminiModelScore(score) {
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return 0;
+  }
+
+  if (numericScore <= 1) {
+    return Math.max(0, Math.min(1, Number(numericScore.toFixed(2))));
+  }
+
+  return Math.max(0, Math.min(1, Number((numericScore / 100).toFixed(2))));
+}
+
+function reopenCallerForNewVoicemail(db, callerPhone) {
+  const current = getLatestCallerContext(db, callerPhone);
+  if (!current) {
+    return;
+  }
+
+  upsertVoicemailAdminState(db, callerPhone, {
+    queueId: current.queue_id,
+    assignedGpId: current.assigned_gp_id,
+    ownerLabel: current.owner_label ?? "Front desk",
+    status: "New",
+    isArchived: false,
+    urgencyOverride: null,
+    statusNote: "",
+    statusNoteType: null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export function updateVoicemail(db, id, patch) {
   const current = getLatestCallerContext(db, id);
   if (!current) {
@@ -1351,9 +2000,16 @@ export function updateVoicemail(db, id, patch) {
   let ownerLabel = patch.owner ?? current.owner_label;
   let assignedGpId = current.assigned_gp_id;
   let status = patch.status ?? current.status ?? "New";
+  let isArchived = Boolean(current.is_archived);
   let urgencyOverride = current.urgency_override ?? null;
   let statusNote = patch.resolutionNote ?? current.status_note ?? "";
   let statusNoteType = current.status_note_type ?? null;
+
+  if (patch.archive === true) {
+    isArchived = true;
+  } else if (patch.archive === false) {
+    isArchived = false;
+  }
 
   if (patch.revertUrgency === true) {
     urgencyOverride = null;
@@ -1387,17 +2043,13 @@ export function updateVoicemail(db, id, patch) {
     if (!queue) {
       throw new Error(`Unknown queue: ${patch.queue}`);
     }
-    queueId = queue.id;
     if (!patch.owner) {
-      if (patch.queue === "GP Callbacks") {
-        const primaryGp = getPrimaryGpForCaller(db, id);
-        ownerLabel = primaryGp?.name ?? "Front desk";
-        assignedGpId = primaryGp?.id ?? null;
-      } else {
-        ownerLabel = queue.default_owner_label;
-        const gp = db.prepare("SELECT id FROM gps WHERE name = ?").get(ownerLabel);
-        assignedGpId = gp ? gp.id : null;
-      }
+      const queueAssignment = resolveQueueAssignment(db, id, queue);
+      queueId = queueAssignment.queueId;
+      ownerLabel = queueAssignment.ownerLabel;
+      assignedGpId = queueAssignment.assignedGpId;
+    } else {
+      queueId = queue.id;
     }
   }
 
@@ -1406,22 +2058,17 @@ export function updateVoicemail(db, id, patch) {
     assignedGpId = gp ? gp.id : null;
   }
 
-  db.prepare(
-    `
-      INSERT INTO voicemail_admin_states (
-        caller_phone, queue_id, assigned_gp_id, owner_label, status, urgency_override, status_note, status_note_type, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(caller_phone) DO UPDATE SET
-        queue_id = excluded.queue_id,
-        assigned_gp_id = excluded.assigned_gp_id,
-        owner_label = excluded.owner_label,
-        status = excluded.status,
-        urgency_override = excluded.urgency_override,
-        status_note = excluded.status_note,
-        status_note_type = excluded.status_note_type,
-        updated_at = excluded.updated_at
-    `,
-  ).run(id, queueId, assignedGpId, ownerLabel, status, urgencyOverride, statusNote, statusNoteType, new Date().toISOString());
+  upsertVoicemailAdminState(db, id, {
+    queueId,
+    assignedGpId,
+    ownerLabel,
+    status,
+    isArchived,
+    urgencyOverride,
+    statusNote,
+    statusNoteType,
+    updatedAt: new Date().toISOString(),
+  });
 
   return getVoicemails(db).find((item) => item.id === id) ?? null;
 }
@@ -1854,4 +2501,4 @@ export function upsertPatientUrgencyMarker(db, { patientId, gpId, urgency, note 
     .get(patientId, gpId);
 }
 
-export { dbPath, schemaPaths, schemaSql };
+export { audioDir, dbPath, schemaPaths, schemaSql };

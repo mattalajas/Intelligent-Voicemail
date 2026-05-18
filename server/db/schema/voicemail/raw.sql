@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS raw_voicemails (
   clinic_id INTEGER NOT NULL,
   received_at TEXT NOT NULL,
   patient_name TEXT,
+  audio_file_path TEXT,
   UNIQUE (caller_phone, clinic_id, received_at),
   FOREIGN KEY (clinic_id) REFERENCES clinics(id)
 );

@@ -1,0 +1,23 @@
+{
+  "transcription": "Hello, this is Nick Alajas. I need to book an appointment for today because the baby has been unwell overnight.",
+  "summary": "Caller requests a same-day appointment after the baby was unwell overnight.",
+  "reasonForCall": "Requesting a same-day appointment for a sick baby.",
+  "recommendedNextSteps": "Book same-day review",
+  "intents": [
+    { "label": "Symptom concern", "score": 72 },
+    { "label": "Medication reaction", "score": 9 },
+    { "label": "Doctor callback", "score": 21 },
+    { "label": "Appointment request", "score": 96 },
+    { "label": "Prescription request", "score": 6 },
+    { "label": "Test results query", "score": 4 },
+    { "label": "General callback", "score": 15 },
+    { "label": "Administrative request", "score": 8 },
+    { "label": "Referral follow-up", "score": 2 }
+  ],
+  "urgencyKeywords": [
+    { "keyword": "high fever", "urgency": "High", "score": 81 },
+    { "keyword": "infant", "urgency": "High", "score": 92 },
+    { "keyword": "same day", "urgency": "High", "score": 88 },
+    { "keyword": "chest pain", "urgency": "Critical", "score": 3 }
+  ]
+}

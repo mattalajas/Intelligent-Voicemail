@@ -81,4 +81,12 @@ export const patientUrgencyMarkers = [
     note: "Infant with recent hospital presentation.",
     isActive: 1,
   },
+  {
+    id: 3,
+    patientId: 11,
+    gpId: 1,
+    urgency: "Critical",
+    note: "Recent hospital visit after having a baby. Escalate any voicemail urgently.",
+    isActive: 1,
+  },
 ];
