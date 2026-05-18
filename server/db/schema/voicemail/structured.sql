@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS structured_voicemails (
   caller_phone TEXT NOT NULL,
   clinic_id INTEGER NOT NULL,
   received_at TEXT NOT NULL,
+  audio_file_path TEXT,
   transcription TEXT NOT NULL,
   transcription_confidence TEXT NOT NULL CHECK (transcription_confidence IN ('High', 'Medium', 'Low')),
   transcription_summary TEXT NOT NULL,
