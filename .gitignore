@@ -147,3 +147,8 @@ server/db/data/audio
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+.github
+.playwright-data
+.playwright-mcp
+.vscode
