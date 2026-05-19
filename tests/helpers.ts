@@ -10,7 +10,8 @@ export async function reseedTestDatabase(request: APIRequestContext) {
 export async function fetchVoicemails(request: APIRequestContext) {
   const response = await request.get(`${apiBaseUrl}/api/voicemails`);
   expect(response.ok()).toBeTruthy();
-  return response.json();
+  const data = await response.json();
+  return Array.isArray(data.items) ? data.items : [];
 }
 
 export async function gotoDashboard(page: Page) {

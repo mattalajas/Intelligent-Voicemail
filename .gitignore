@@ -152,3 +152,4 @@ server/db/data/audio
 .playwright-data
 .playwright-mcp
 .vscode
+specs
